@@ -59,7 +59,10 @@ def _make_orchestrator(
     evaluator = MagicMock()
     evaluator.evaluate = AsyncMock(return_value=_make_eval_result(eval_should_send, eval_score))
 
-    orchestrator = Orchestrator(classifier, conversationalist, evaluator)
+    agent_run_repo = MagicMock()
+    agent_run_repo.create = AsyncMock(return_value=None)
+
+    orchestrator = Orchestrator(classifier, conversationalist, evaluator, agent_run_repo)
     return orchestrator, classifier, conversationalist, evaluator
 
 

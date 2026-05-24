@@ -9,6 +9,7 @@ import structlog
 from zolvo.agents.conversationalist import ConversationalistAgent
 from zolvo.agents.evaluator import EvaluatorAgent
 from zolvo.intent.classifier import IntentClassifier
+from zolvo.repositories.agent_runs import AgentRunRepository
 
 log = structlog.get_logger(__name__)
 
@@ -34,10 +35,12 @@ class Orchestrator:
         intent_classifier: IntentClassifier,
         conversationalist: ConversationalistAgent,
         evaluator: EvaluatorAgent,
+        agent_run_repo: AgentRunRepository,
     ) -> None:
         self._classifier = intent_classifier
         self._conversationalist = conversationalist
         self._evaluator = evaluator
+        self._agent_run_repo = agent_run_repo
 
     async def handle_reply(
         self,
@@ -48,6 +51,16 @@ class Orchestrator:
     ) -> OrchestratorResult:
         # ── Gate 1: Intent Classification ────────────────────────────────────
         intent_result = await self._classifier.classify(message)
+
+        await self._agent_run_repo.create(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            agent_name="intent_classifier",
+            output_payload={
+                "intent": intent_result.intent,
+                "should_handoff": intent_result.should_handoff,
+            },
+        )
 
         log.info(
             "orchestrator.intent_classified",
