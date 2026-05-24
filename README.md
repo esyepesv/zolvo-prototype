@@ -406,4 +406,5 @@ Ver [PROGRESS.md](PROGRESS.md) para el estado detallado y decisiones técnicas.
 
 - [Arquitectura del sistema](docs/arquitectura-zolvo.md) — C4, ADRs, modelo de datos, máquina de estados
 - [PROGRESS.md](PROGRESS.md) — estado de desarrollo y decisiones tomadas
+- [n8n — workflows y simulación México](n8n/README.md) — qué hace n8n, curl commands, escenario Konfío
 - [Supabase setup](supabase/README.md)
