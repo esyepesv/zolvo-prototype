@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 1 — COMPLETADO** |
-| Próximo hito | **Hito 2 — Modelo de datos y repositorios** |
-| Último commit | `feat: Hito 1 — LLM Gateway con Strategy pattern` |
+| Hito actual | **Hito 2 — COMPLETADO** |
+| Próximo hito | **Hito 3 — Researcher Agent** |
+| Último commit | `feat: Hito 2 — modelo de datos y repositorios con supabase-py` |
 
 ---
 
@@ -25,7 +25,7 @@
 |---|---|---|---|
 | 0 | Setup base | ✅ COMPLETADO | ✅ |
 | 1 | LLM Gateway (Strategy pattern) | ✅ COMPLETADO | ✅ |
-| 2 | Modelo de datos y repositorios | ⏳ PENDIENTE | — |
+| 2 | Modelo de datos y repositorios | ✅ COMPLETADO | ✅ |
 | 3 | Researcher Agent | ⏳ PENDIENTE | — |
 | 4 | Copywriter Agent | ⏳ PENDIENTE | — |
 | 5 | Intent Classifier (Puerta 1) | ⏳ PENDIENTE | — |
@@ -140,9 +140,32 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 2: Modelo de datos y repositorios
+---
 
-**Prerequisito:** El autor debe crear el proyecto Supabase y llenar `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` en `.env` antes de este hito.
+### ✅ Hito 2 — Modelo de datos y repositorios
+
+**DoD cumplido:** `ruff check .` → OK | `pytest -q` → 12 passed | integración real contra Supabase Cloud
+
+**Decisión técnica:** se usó `supabase-py` (REST API vía HTTPS) en lugar de SQLAlchemy + asyncpg directo. El host directo de Supabase (`db.[ref].supabase.co`) solo tiene IPv6, no alcanzable desde WSL2. El pooler de Supavisor (IPv4) retornó "Tenant or user not found" para este proyecto. supabase-py resuelve al CDN CloudFlare (IPv4) sin problema.
+
+**Archivos creados:**
+- `supabase/migrations/00000000000001_domain_tables.sql` — 7 tablas con RLS + índices (aplicadas vía MCP)
+- `src/zolvo/models/domain.py` — Pydantic models: `Lead`, `Conversation`, `Message`, `AgentRun`, `EventOutbox`
+- `src/zolvo/repositories/base.py` — `BaseRepository[M]` genérico con supabase-py async
+- `src/zolvo/repositories/leads.py` — `LeadRepository`
+- `src/zolvo/repositories/conversations.py` — `ConversationRepository`
+- `src/zolvo/repositories/messages.py` — `MessageRepository`
+- `src/zolvo/repositories/agent_runs.py` — `AgentRunRepository`
+- `src/zolvo/api/deps.py` — `get_supabase()` dependency (service_role key)
+- `tests/integration/test_repositories.py` — 5 integration tests (create, read, cross-tenant isolation)
+
+**Tests:** 7 unit + 5 integration = 12 total pasando
+
+---
+
+## Próximo hito — Hito 3: Researcher Agent
+
+**Prerequisito:** ✅ Supabase configurado y repositorios funcionando.
 
 **Qué construir:**
 
