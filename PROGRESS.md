@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 5 — COMPLETADO** |
-| Próximo hito | **Hito 6 — Memory Service** |
-| Último commit | `feat: Hito 5 — Intent Classifier con 9 categorías y handoff automático` |
+| Hito actual | **Hito 6 — COMPLETADO** |
+| Próximo hito | **Hito 7 — Conversationalist Agent** |
+| Último commit | `feat: Hito 6 — Memory Service con memoria dual (textual + semántica)` |
 
 ---
 
@@ -29,7 +29,7 @@
 | 3 | Researcher Agent | ✅ COMPLETADO | ✅ |
 | 4 | Copywriter Agent | ✅ COMPLETADO | ✅ |
 | 5 | Intent Classifier (Puerta 1) | ✅ COMPLETADO | ✅ |
-| 6 | Memory Service (memoria dual) | ⏳ PENDIENTE | — |
+| 6 | Memory Service (memoria dual) | ✅ COMPLETADO | ✅ |
 | 7 | Conversationalist Agent | ⏳ PENDIENTE | — |
 | 8 | Evaluator / Confidence Gate (Puerta 2) | ⏳ PENDIENTE | — |
 | 9 | Orchestrator | ⏳ PENDIENTE | — |
@@ -203,20 +203,33 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 6: Memory Service (memoria dual)
+### ✅ Hito 6 — Memory Service (memoria dual)
 
-**Prerequisito:** ✅ Repositorios, Researcher Agent (embeddings), supabase-py disponibles.
+**DoD cumplido:** `ruff check .` → OK | `pytest -q` → 38 passed
+
+**Archivos creados:**
+- `src/zolvo/memory/service.py` — `MemoryService.get_short_term()`, `get_long_term()`, `summarize_and_index()`
+- `src/zolvo/models/domain.py` — añadidos `ConversationSummary` y `MemoryMatch`
+- `src/zolvo/llm/prompts/summarizer.txt` — prompt español denso optimizado para vectorización
+- `supabase/migrations/00000000000002_similarity_search.sql` — `match_lead_embeddings` y `match_conversation_summaries`
+- `tests/unit/test_memory_service.py` — 5 tests con mocks y FakeLLMProvider
+
+---
+
+## Próximo hito — Hito 7: Conversationalist Agent
+
+**Prerequisito:** ✅ Memory Service funcional (short + long term)
 
 **Qué construir:**
 
-1. `src/zolvo/memory/service.py` — `MemoryService`:
-   - `get_short_term(conversation_id, n=15)` → últimos N mensajes textuales
-   - `get_long_term(query_embedding, top_k=5)` → similarity search en `lead_embeddings` + `conversation_summaries_embeddings`
-   - `summarize_and_index(conversation_id)` → genera resumen y lo vectoriza al cerrar conversación
-2. Migration para `conversation_summaries_embeddings` si no existe
-3. Tests unitarios con dataset sintético
+1. `src/zolvo/agents/conversationalist.py` — `Conversationalist`:
+   - Mantiene threads multi-turn
+   - Consume memoria dual vía `MemoryService`
+   - Recibe el `intent` ya clasificado y ajusta su comportamiento
+2. `src/zolvo/llm/prompts/conversationalist.txt` — prompt español para la respuesta
+3. Tests unitarios
 
-**DoD:** ambos métodos funcionan; el agente puede consultarlos para enriquecer su contexto.
+**DoD:** mantiene un thread coherente respondiendo de forma acorde al intent detectado y usando su memoria.
 
 ---
 

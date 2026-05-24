@@ -30,7 +30,8 @@ def _intent_json(intent: str, confidence: float = 0.9, reason: str = "test") -> 
             "intent": intent,
             "confidence": confidence,
             "reason": reason,
-            "should_handoff": intent in {"complaint", "complex_technical", "out_of_scope", "opt_out"},  # noqa: E501
+            "should_handoff": intent
+            in {"complaint", "complex_technical", "out_of_scope", "opt_out"},  # noqa: E501
         }
     )
 
@@ -85,9 +86,7 @@ async def test_meeting_intent_does_not_handoff() -> None:
 @pytest.mark.asyncio
 async def test_opt_out_triggers_handoff() -> None:
     classifier = _make_classifier(_intent_json("opt_out"))
-    result = await classifier.classify(
-        "Por favor elimínenme de su lista, no quiero más correos."
-    )
+    result = await classifier.classify("Por favor elimínenme de su lista, no quiero más correos.")
     assert result.intent == "opt_out"
     assert result.should_handoff is True
 

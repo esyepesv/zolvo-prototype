@@ -3,6 +3,7 @@
 Skipped automatically when SUPABASE_URL is not configured.
 Run with: pytest tests/integration/ -v
 """
+
 from __future__ import annotations
 
 import uuid

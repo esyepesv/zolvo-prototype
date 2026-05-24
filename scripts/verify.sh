@@ -155,12 +155,15 @@ print('repos OK')
 import asyncio
 from zolvo.repositories.leads import LeadRepository
 from zolvo.config import get_settings
+from supabase import acreate_client
 async def test():
-    repo = LeadRepository(get_settings())
+    settings = get_settings()
+    client = await acreate_client(settings.supabase_url, settings.supabase_service_role_key)
+    repo = LeadRepository(client)
     lead = await repo.create(
         tenant_id='00000000-0000-0000-0000-000000000001',
         full_name='Test Lead Verify', company='Acme MX', source='test')
-    fetched = await repo.get_by_id(lead.id, tenant_id=lead.tenant_id)
+    fetched = await repo.get_by_id(lead.id)
     assert fetched.id == lead.id
     print('repo integration OK')
 asyncio.run(test())
@@ -186,8 +189,11 @@ if [[ "$HITO" == "all" || "$HITO" -ge 5 ]] 2>/dev/null; then
     if PYTHONPATH=src python3 -c "
 import asyncio
 from zolvo.intent.classifier import IntentClassifier
+from zolvo.config import Settings
 from zolvo.llm.fake_provider import FakeLLMProvider
-clf = IntentClassifier(provider=FakeLLMProvider(overrides={'classify': 'objection_price'}))
+from zolvo.llm.gateway import LLMGateway
+gw = LLMGateway(Settings(env='test', openai_api_key=''), extra_providers={'fake': FakeLLMProvider(overrides={'classification': 'objection_price'})})
+clf = IntentClassifier(gateway=gw)
 result = asyncio.run(clf.classify('Su precio es muy alto'))
 assert result.intent == 'objection_price'
 assert not result.should_handoff

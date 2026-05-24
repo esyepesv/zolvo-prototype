@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -73,3 +75,27 @@ class EventOutbox(BaseModel):
     published_at: datetime | None = None
     attempts: int = 0
     created_at: datetime | None = None
+
+
+class ConversationSummary(BaseModel):
+    """Maps to conversation_summaries_embeddings table."""
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4)
+    conversation_id: uuid.UUID
+    tenant_id: uuid.UUID
+    summary_text: str | None = None
+    outcome: str | None = None
+    loss_reason: str | None = None
+    model_used: str | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class MemoryMatch:
+    """DTO returned by long-term similarity search."""
+
+    source: str  # "lead_embedding" | "conversation_summary"
+    source_id: uuid.UUID
+    text: str
+    similarity: float
+    metadata: dict[str, Any] = dc_field(default_factory=dict)
