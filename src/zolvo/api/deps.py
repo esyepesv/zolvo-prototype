@@ -10,6 +10,9 @@ from zolvo.agents.conversationalist import ConversationalistAgent
 from zolvo.agents.copywriter import CopywriterAgent
 from zolvo.agents.evaluator import EvaluatorAgent
 from zolvo.agents.researcher import ResearcherAgent
+from zolvo.channels.email_mock import EmailMockAdapter
+from zolvo.channels.linkedin_mock import LinkedInMockAdapter
+from zolvo.channels.slack_stub import SlackStub
 from zolvo.config import get_settings
 from zolvo.intent.classifier import IntentClassifier
 from zolvo.llm.gateway import LLMGateway
@@ -65,6 +68,18 @@ async def get_conv_repo(supabase: AsyncClient = Depends(get_supabase)) -> Conver
 
 async def get_message_repo(supabase: AsyncClient = Depends(get_supabase)) -> MessageRepository:
     return MessageRepository(supabase)
+
+
+def get_linkedin_adapter() -> LinkedInMockAdapter:
+    return LinkedInMockAdapter()
+
+
+def get_email_adapter() -> EmailMockAdapter:
+    return EmailMockAdapter()
+
+
+def get_slack_stub() -> SlackStub:
+    return SlackStub()
 
 
 async def get_orchestrator(

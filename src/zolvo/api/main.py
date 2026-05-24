@@ -9,6 +9,7 @@ from fastapi import FastAPI
 
 from zolvo.api.routes.agents import router as agents_router
 from zolvo.api.routes.events import router as events_router
+from zolvo.api.routes.operator import router as operator_router
 from zolvo.config import get_settings
 from zolvo.observability.logging import configure_logging
 
@@ -28,6 +29,7 @@ app = FastAPI(title="Zolvo AI Sales Engine", version="0.1.0", lifespan=lifespan)
 
 app.include_router(agents_router)
 app.include_router(events_router)
+app.include_router(operator_router)
 
 
 @app.get("/health")

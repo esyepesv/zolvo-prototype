@@ -4,7 +4,14 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends
 
-from zolvo.api.deps import get_message_repo, get_orchestrator
+from zolvo.api.deps import (
+    get_linkedin_adapter,
+    get_message_repo,
+    get_orchestrator,
+    get_slack_stub,
+)
+from zolvo.channels.linkedin_mock import LinkedInMockAdapter
+from zolvo.channels.slack_stub import SlackStub
 from zolvo.orchestrator.orchestrator import Orchestrator
 from zolvo.repositories.messages import MessageRepository
 from zolvo.schemas import ReplyRequest, ReplyResponse
@@ -17,8 +24,10 @@ async def receive_reply(
     body: ReplyRequest,
     orchestrator: Orchestrator = Depends(get_orchestrator),
     message_repo: MessageRepository = Depends(get_message_repo),
+    linkedin: LinkedInMockAdapter = Depends(get_linkedin_adapter),
+    slack: SlackStub = Depends(get_slack_stub),
 ) -> ReplyResponse:
-    """Receive an inbound reply → run two-gate pipeline → return routing decision."""
+    """Receive an inbound reply → run two-gate pipeline → route via channel or escalate."""
     await message_repo.create(
         tenant_id=body.tenant_id,
         conversation_id=body.conversation_id,
@@ -40,6 +49,27 @@ async def receive_reply(
             content=result.draft,
             generated_by_agent="conversationalist",
             confidence_score=Decimal(str(round(result.confidence_score or 0, 4))),
+        )
+        # Simulate delivery via channel adapter (LinkedIn DM in this demo)
+        await linkedin.send_message(
+            to=str(body.conversation_id),
+            body=result.draft,
+        )
+
+    elif result.action == "handoff":
+        await slack.notify_handoff(
+            conversation_id=str(body.conversation_id),
+            intent=result.intent,
+            reason=result.reason,
+        )
+
+    elif result.action == "escalate" and result.draft:
+        await slack.notify_escalation(
+            conversation_id=str(body.conversation_id),
+            intent=result.intent,
+            confidence_score=result.confidence_score or 0.0,
+            draft_preview=result.draft,
+            reason=result.reason,
         )
 
     return ReplyResponse(
