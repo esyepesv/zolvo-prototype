@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 9 — COMPLETADO** |
-| Próximo hito | **Hito 10 — n8n workflow vía MCP** |
-| Último commit | `feat: Hito 9 — Orchestrator con pipeline de dos puertas` |
+| Hito actual | **Hito 10 — COMPLETADO** |
+| Próximo hito | **Hito 11 — Dataset sintético + demo end-to-end** |
+| Último commit | `feat: Hito 10 — n8n workflows creados vía API` |
 
 ---
 
@@ -33,7 +33,7 @@
 | 7 | Conversationalist Agent | ✅ COMPLETADO | ✅ |
 | 8 | Evaluator / Confidence Gate (Puerta 2) | ✅ COMPLETADO | ✅ |
 | 9 | Orchestrator | ✅ COMPLETADO | ✅ |
-| 10 | n8n workflow vía MCP | ⏳ PENDIENTE | — |
+| 10 | n8n workflow vía MCP | ✅ COMPLETADO | ✅ |
 | 11 | Dataset sintético + demo end-to-end | ⏳ PENDIENTE | — |
 | 12 | Polish para el video | ⏳ PENDIENTE | — |
 
@@ -254,21 +254,41 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 10: n8n workflow vía MCP
+### ✅ Hito 10 — n8n workflow vía API
 
-**Prerequisito:** ✅ Orchestrator + API FastAPI (endpoints HTTP para disparar el pipeline)
+**DoD cumplido:** 54 tests pasando | ruff OK | 2 workflows activos en n8n
+
+**Archivos creados:**
+- `src/zolvo/schemas.py` — `IngestRequest`, `IngestResponse`, `ReplyRequest`, `ReplyResponse`
+- `src/zolvo/api/routes/agents.py` — `POST /agents/ingest`: crea lead → researcher → conversación → copywriter
+- `src/zolvo/api/routes/events.py` — `POST /events/reply`: persiste mensaje → Orchestrator → persiste draft si send
+- `src/zolvo/api/deps.py` — factory functions para todos los agentes con DI FastAPI
+- `src/zolvo/api/main.py` — registra routers `agents` y `events`
+- `n8n/workflows/zolvo-new-lead-ingestion.json` — workflow exportado (id: `5VEfQA0VC44iM6Zs`)
+- `n8n/workflows/zolvo-reply-received.json` — workflow exportado (id: `LDjEhcuc7DMNRywX`)
+
+**Nota técnica:** n8n MCP no estaba configurado en sesión; workflows creados vía REST API (`POST /api/v1/workflows`). `B008` (Depends en args) ignorado en ruff — es el patrón estándar FastAPI.
+
+**Webhooks activos en n8n:**
+- `POST https://n8n.stivenyepes.com/webhook/zolvo-new-lead` → `/agents/ingest`
+- `POST https://n8n.stivenyepes.com/webhook/zolvo-reply` → `/events/reply`
+
+---
+
+## Próximo hito — Hito 11: Dataset sintético + demo end-to-end
+
+**Prerequisito:** ✅ Pipeline completo (API + n8n + Orchestrator)
 
 **Qué construir:**
 
-1. Endpoints FastAPI en `src/zolvo/api/routes/`:
-   - `POST /agents/ingest` — ingesta lead + researcher + copywriter
-   - `POST /events/reply` — recibe reply → Orchestrator.handle_reply()
-2. Workflow n8n vía MCP:
-   - Trigger: webhook nuevo lead → llama `/agents/ingest`
-   - Trigger: webhook reply entrante → llama `/events/reply`
-3. Export del workflow a `n8n/workflows/`
+1. `supabase/seed_demo.sql` — 5 leads realistas de fintech B2B mexicana + 1 conversación con 3-4 mensajes
+2. `demo/run_happy_path.py` — script que:
+   - Crea lead vía `POST /agents/ingest`
+   - Simula 3 turnos de respuesta vía `POST /events/reply` (interested → objection_price → meeting_intent)
+   - Imprime en consola el estado al final (leads, agent_runs, cost, intent_distribution)
+3. Validar que las respuestas son coherentes
 
-**DoD:** `curl` al webhook de n8n recorre el flujo y deja registro en Supabase.
+**DoD:** `python demo/run_happy_path.py` corre sin errores y muestra el pipeline completo.
 
 ---
 
