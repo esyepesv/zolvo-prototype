@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="")
     openrouter_api_key: str = Field(default="")
     ollama_base_url: str = Field(default="http://localhost:11434")
+    ollama_model: str = Field(default="qwen3-coder")
 
     # Multi-tenancy
     default_tenant_id: str = Field(default="00000000-0000-0000-0000-000000000001")
@@ -31,7 +32,7 @@ class Settings(BaseSettings):
     debounce_max_seconds: int = Field(default=90, ge=0)
 
     # LLM routing
-    preferred_llm_provider: str = Field(default="anthropic")
+    preferred_llm_provider: str = Field(default="openrouter")
 
     # App
     env: Literal["dev", "test", "prod"] = Field(default="dev")
