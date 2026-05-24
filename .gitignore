@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+
+# Env files (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.orig
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Zone identifiers (WSL artifacts)
+*:Zone.Identifier
+
+# n8n exports (large binaries go to git-lfs if needed)
+# Keep .gitkeep but ignore generated exports > 1MB if any

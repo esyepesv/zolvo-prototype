@@ -1,0 +1,27 @@
+# pyproject.toml — tooling config only (ruff, pytest).
+# Dependencies are in requirements.txt / requirements-dev.txt (author's choice).
+# CLAUDE.md §4 originally specified deps here; this deviates intentionally.
+
+[project]
+name = "zolvo"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
+ignore = [
+    "ANN401",  # Any allowed where needed
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
