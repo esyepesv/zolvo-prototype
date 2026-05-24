@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import os
 
-import pytest
+# Set ENV before any module-level imports cache Settings via lru_cache.
+os.environ["ENV"] = "test"
+os.environ.setdefault("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
+os.environ.setdefault("LOG_LEVEL", "WARNING")
 
+import pytest  # noqa: E402
 
-@pytest.fixture(autouse=True, scope="session")
-def set_test_env() -> None:
-    """Force test environment so Settings picks up safe defaults."""
-    os.environ.setdefault("ENV", "test")
-    os.environ.setdefault("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001")
-    os.environ.setdefault("LOG_LEVEL", "WARNING")
+from zolvo.config import get_settings  # noqa: E402
+
+get_settings.cache_clear()
