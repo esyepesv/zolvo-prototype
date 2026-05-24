@@ -770,7 +770,7 @@ events_outbox
 | Canales | LinkedIn, Gmail/Outlook, Google Calendar | Estándar de outbound B2B |
 | Observabilidad | OpenTelemetry + logs estructurados | Estándar, agnóstico a vendor |
 | Notificaciones | Slack webhooks | Habitual en equipos B2B |
-| Despliegue | Vercel (n8n) + Railway/Fly.io (FastAPI) + Supabase Cloud | Stack ligero, pay-as-you-go |
+| Despliegue | Local · FastAPI en `localhost:8000` + n8n self-hosted en `n8n.stivenyepes.com` + Supabase Cloud | Demo en máquina local; n8n ya desplegado en el mismo host |
 | CI/CD | GitHub Actions | Estándar |
 
 ---
@@ -818,10 +818,13 @@ Esta fórmula es defendible porque cada variable se mide desde la base de datos,
 
 - ✅ **[Hito 1]** LLM Gateway funcional con 4 proveedores (OpenRouter, Anthropic, OpenAI, Ollama Cloud)
 - ✅ **[Hito 2]** Persistencia en Supabase con RLS y políticas multi-tenant activadas
-- ⏳ Intent Classifier + Confidence Gate (las dos puertas del pipeline, ADR-04)
-- ⏳ Researcher + Copywriter + Conversationalist funcionales
-- ⏳ Memoria dual: chat_history textual + RAG con pgvector (ADR-07)
-- ⏳ Workflow básico en n8n disparando el flujo end-to-end
+- ✅ **[Hito 3]** Researcher Agent — enrichment + embedding de leads
+- ✅ **[Hito 4]** Copywriter Agent — mensaje outbound personalizado
+- ✅ **[Hito 5]** Intent Classifier — 9 categorías, handoff automático
+- ⏳ Memory Service (memoria dual: short-term textual + long-term RAG pgvector)
+- ⏳ Conversationalist + Evaluator (Confidence Gate)
+- ⏳ Orchestrator coordinando el pipeline completo
+- ⏳ Workflow en n8n self-hosted (n8n.stivenyepes.com) disparando el flujo end-to-end
 - ⏳ Demo del happy path con datos reales del ICP mexicano (fintech B2B)
 
 ### Fuera de alcance para el prototipo (documentado, no implementado)
@@ -836,7 +839,6 @@ Esta fórmula es defendible porque cada variable se mide desde la base de datos,
 
 ### Decisiones diferidas
 
-- Hosting definitivo (Vercel vs Railway vs self-host)
 - Selección final de modelos por tarea (depende de benchmarks)
 - Política exacta de retry y backoff (depende de comportamiento real de APIs)
 

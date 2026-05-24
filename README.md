@@ -53,7 +53,8 @@ PYTHONPATH=src uvicorn zolvo.api.main:app --reload
 | Base de datos | Supabase (Postgres + pgvector + RLS multi-tenant) |
 | Acceso a datos | supabase-py async (REST API vía HTTPS) |
 | LLM Gateway | Strategy pattern: OpenRouter · Anthropic · OpenAI · Ollama Cloud |
-| Orquestación | n8n (workflows visibles para sales rep) |
+| Orquestación | n8n self-hosted en `n8n.stivenyepes.com` |
+| Despliegue | Local · FastAPI en `localhost:8000` + n8n en la misma máquina |
 | Observabilidad | structlog + `agent_runs` table (costo, latencia, tokens por agente) |
 
 ## Estructura
@@ -104,7 +105,10 @@ zolvo-prototype/
 | 0 | Setup base (FastAPI, CI, Supabase schema) | ✅ |
 | 1 | LLM Gateway con Strategy pattern | ✅ |
 | 2 | Modelo de datos y repositorios | ✅ |
-| 3–12 | Agentes, Orchestrator, n8n, Demo | ⏳ |
+| 3 | Researcher Agent (enrichment + embeddings) | ✅ |
+| 4 | Copywriter Agent (mensaje outbound) | ✅ |
+| 5 | Intent Classifier (Puerta 1, 9 categorías) | ✅ |
+| 6–12 | Memory Service, Conversationalist, Evaluator, Orchestrator, n8n, Demo | ⏳ |
 
 Ver [PROGRESS.md](PROGRESS.md) para el estado detallado y [CLAUDE.md](CLAUDE.md) para la guía operativa.
 

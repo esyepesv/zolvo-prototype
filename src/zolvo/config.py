@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     # LLM routing
     preferred_llm_provider: str = Field(default="openrouter")
 
+    # n8n (self-hosted en n8n.stivenyepes.com)
+    n8n_base_url: str = Field(default="https://n8n.stivenyepes.com")
+    n8n_api_key: str = Field(default="")
+
     # App
     env: Literal["dev", "test", "prod"] = Field(default="dev")
     log_level: str = Field(default="INFO")

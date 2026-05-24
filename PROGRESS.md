@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 2 — COMPLETADO** |
-| Próximo hito | **Hito 3 — Researcher Agent** |
-| Último commit | `feat: Hito 2 — modelo de datos y repositorios con supabase-py` |
+| Hito actual | **Hito 5 — COMPLETADO** |
+| Próximo hito | **Hito 6 — Memory Service** |
+| Último commit | `feat: Hito 5 — Intent Classifier con 9 categorías y handoff automático` |
 
 ---
 
@@ -26,9 +26,9 @@
 | 0 | Setup base | ✅ COMPLETADO | ✅ |
 | 1 | LLM Gateway (Strategy pattern) | ✅ COMPLETADO | ✅ |
 | 2 | Modelo de datos y repositorios | ✅ COMPLETADO | ✅ |
-| 3 | Researcher Agent | ⏳ PENDIENTE | — |
-| 4 | Copywriter Agent | ⏳ PENDIENTE | — |
-| 5 | Intent Classifier (Puerta 1) | ⏳ PENDIENTE | — |
+| 3 | Researcher Agent | ✅ COMPLETADO | ✅ |
+| 4 | Copywriter Agent | ✅ COMPLETADO | ✅ |
+| 5 | Intent Classifier (Puerta 1) | ✅ COMPLETADO | ✅ |
 | 6 | Memory Service (memoria dual) | ⏳ PENDIENTE | — |
 | 7 | Conversationalist Agent | ⏳ PENDIENTE | — |
 | 8 | Evaluator / Confidence Gate (Puerta 2) | ⏳ PENDIENTE | — |
@@ -81,6 +81,8 @@ bash scripts/verify.sh
 | `supabase-py` en vez de SQLAlchemy+asyncpg | Host directo de Supabase es solo IPv6 en WSL2; Supavisor pooler no reconoce el proyecto; supabase-py usa REST/HTTPS vía CloudFlare IPv4 |
 | Modelos Pydantic (no ORM) | Consecuencia del cambio a supabase-py — dict de respuesta se mapea directamente |
 | PREFERRED_LLM_PROVIDER=openrouter | Más barato para el demo; fallback: ollama → anthropic → openai |
+| **Despliegue local** | FastAPI en `localhost:8000`; n8n self-hosted en `n8n.stivenyepes.com` (misma máquina); Supabase Cloud para DB |
+| n8n self-hosted en n8n.stivenyepes.com | Ya desplegado; se configura via MCP. URL en `N8N_BASE_URL`. |
 
 ---
 
@@ -160,23 +162,61 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 3: Researcher Agent
+### ✅ Hito 3 — Researcher Agent
 
-**Prerequisito:** ✅ Supabase configurado, repositorios funcionando, supabase-py async disponible.
+**DoD cumplido:** `ruff check .` → OK | `pytest -q` → 17 passed
+
+**Archivos creados/modificados:**
+- `src/zolvo/agents/base.py` — `AgentBase` abstracto con DI de `LLMGateway`
+- `src/zolvo/agents/researcher.py` — `ResearcherAgent.run(lead_id, tenant_id)` → enriquece lead + embedding
+- `src/zolvo/llm/prompts/researcher.txt` — prompt español ICP mexicano fintech (8 campos JSON)
+- `src/zolvo/llm/base.py` — añadido `EmbeddingResponse` y `embed()` default con `NotImplementedError`
+- `src/zolvo/llm/gateway.py` — añadido `embed()` con routing OpenAI-first
+- `src/zolvo/llm/openai_provider.py` — añadido `embed()` + constantes `_EMBED_URL`, `_EMBED_MODEL`
+- `src/zolvo/llm/fake_provider.py` — añadido `embed()` → vector `[0.0] * 1536`
+- `src/zolvo/repositories/leads.py` — añadido `save_embedding()` upsert a `lead_embeddings`
+- `tests/unit/test_researcher.py` — 5 tests unitarios
+
+---
+
+### ✅ Hito 4 — Copywriter Agent
+
+**DoD cumplido:** `ruff check .` → OK | `pytest -q` → 22 passed
+
+**Archivos creados:**
+- `src/zolvo/agents/copywriter.py` — `CopywriterAgent.run(lead_id, tenant_id)` → mensaje outbound personalizado
+- `src/zolvo/llm/prompts/copywriter.txt` — prompt español con reglas B2B consultivo México
+- `tests/unit/test_copywriter.py` — 5 tests (JSON estructurado, fallback non-JSON, sin enrichment, not-found, agent_run)
+
+---
+
+### ✅ Hito 5 — Intent Classifier (Puerta 1)
+
+**DoD cumplido:** `ruff check .` → OK | `pytest -q` → 33 passed | casos DoD verificados
+
+**Archivos creados:**
+- `src/zolvo/intent/classifier.py` — `IntentClassifier.classify(message, context)` → `IntentResult`
+- `src/zolvo/llm/prompts/intent_classifier.txt` — prompt con 9 categorías y reglas de handoff
+- `tests/unit/test_intent_classifier.py` — 11 tests (DoD + todas las categorías + edge cases)
+
+**Categorías con handoff=True:** `complaint`, `complex_technical`, `out_of_scope`, `opt_out`
+
+---
+
+## Próximo hito — Hito 6: Memory Service (memoria dual)
+
+**Prerequisito:** ✅ Repositorios, Researcher Agent (embeddings), supabase-py disponibles.
 
 **Qué construir:**
 
-1. `src/zolvo/agents/base.py` — `AgentBase` abstracto con `run()` async y acceso a `LLMGateway` + `AgentRunRepository`
-2. `src/zolvo/agents/researcher.py` — `ResearcherAgent.run(lead_id)`:
-   - Consulta el lead desde `LeadRepository`
-   - Genera enrichment (industria, ICP fit, contexto de empresa) vía `LLMGateway` con `task_type="generation_standard"`
-   - Genera embedding del perfil via API de embeddings (OpenAI `text-embedding-3-small` o equivalente)
-   - Persiste resultado en `leads.enriched_data` y en `lead_embeddings`
-   - Registra `agent_runs` con costo + latencia
-3. `src/zolvo/llm/prompts/researcher.txt` — prompt de enrichment en español
-4. Tests unitarios con `FakeLLMProvider` y un lead sintético
+1. `src/zolvo/memory/service.py` — `MemoryService`:
+   - `get_short_term(conversation_id, n=15)` → últimos N mensajes textuales
+   - `get_long_term(query_embedding, top_k=5)` → similarity search en `lead_embeddings` + `conversation_summaries_embeddings`
+   - `summarize_and_index(conversation_id)` → genera resumen y lo vectoriza al cerrar conversación
+2. Migration para `conversation_summaries_embeddings` si no existe
+3. Tests unitarios con dataset sintético
 
-**DoD:** `researcher.run(lead_id)` enriquece un lead de prueba y guarda el embedding en Supabase.
+**DoD:** ambos métodos funcionan; el agente puede consultarlos para enriquecer su contexto.
 
 ---
 
