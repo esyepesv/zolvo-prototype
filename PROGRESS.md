@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 8 — COMPLETADO** |
-| Próximo hito | **Hito 9 — Orchestrator** |
-| Último commit | `feat: Hito 8 — Evaluator / Confidence Gate con 3 ejes y umbral configurable` |
+| Hito actual | **Hito 9 — COMPLETADO** |
+| Próximo hito | **Hito 10 — n8n workflow vía MCP** |
+| Último commit | `feat: Hito 9 — Orchestrator con pipeline de dos puertas` |
 
 ---
 
@@ -32,7 +32,7 @@
 | 6 | Memory Service (memoria dual) | ✅ COMPLETADO | ✅ |
 | 7 | Conversationalist Agent | ✅ COMPLETADO | ✅ |
 | 8 | Evaluator / Confidence Gate (Puerta 2) | ✅ COMPLETADO | ✅ |
-| 9 | Orchestrator | ⏳ PENDIENTE | — |
+| 9 | Orchestrator | ✅ COMPLETADO | ✅ |
 | 10 | n8n workflow vía MCP | ⏳ PENDIENTE | — |
 | 11 | Dataset sintético + demo end-to-end | ⏳ PENDIENTE | — |
 | 12 | Polish para el video | ⏳ PENDIENTE | — |
@@ -242,22 +242,33 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 9: Orchestrator
+### ✅ Hito 9 — Orchestrator
 
-**Prerequisito:** ✅ Evaluator funcional
+**DoD cumplido:** `ruff check .` → OK | `pytest -q` → 54 passed
+
+**Archivos creados:**
+- `src/zolvo/orchestrator/orchestrator.py` — `Orchestrator.handle_reply()`: Gate 1 (IntentClassifier) → si handoff devuelve inmediato; si no → ConversationalistAgent → Gate 2 (EvaluatorAgent) → `"send"` o `"escalate"`
+- `tests/unit/test_orchestrator.py` — 5 tests: handoff salta generación, draft bueno → send, baja confianza → escalate, todas las etapas se invocan, context del evaluador incluye intent
+
+**Diseño:** el Orchestrator solo orquesta — no tiene acceso directo a memoria ni a repositorios; el draft se propaga siempre en `escalate` para que el humano pueda revisarlo.
+
+---
+
+## Próximo hito — Hito 10: n8n workflow vía MCP
+
+**Prerequisito:** ✅ Orchestrator + API FastAPI (endpoints HTTP para disparar el pipeline)
 
 **Qué construir:**
 
-`src/zolvo/orchestrator/orchestrator.py` — `Orchestrator.handle_reply()`:
-1. Recibe evento `reply.received` (message + conversation_id + tenant_id)
-2. Carga memoria vía `MemoryService`
-3. Llama a `IntentClassifier`
-4. Si `should_handoff` → retorna `OrchestratorResult(action="handoff")` (sin generar)
-5. Si no → llama a `ConversationalistAgent`
-6. Llama a `EvaluatorAgent`
-7. Si `should_send` → retorna `OrchestratorResult(action="send", draft=...)` | si no → `action="escalate"`
+1. Endpoints FastAPI en `src/zolvo/api/routes/`:
+   - `POST /agents/ingest` — ingesta lead + researcher + copywriter
+   - `POST /events/reply` — recibe reply → Orchestrator.handle_reply()
+2. Workflow n8n vía MCP:
+   - Trigger: webhook nuevo lead → llama `/agents/ingest`
+   - Trigger: webhook reply entrante → llama `/events/reply`
+3. Export del workflow a `n8n/workflows/`
 
-**DoD:** happy path completo con datos sintéticos; test de integración con mocks.
+**DoD:** `curl` al webhook de n8n recorre el flujo y deja registro en Supabase.
 
 ---
 
