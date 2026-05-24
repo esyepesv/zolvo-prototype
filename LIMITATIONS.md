@@ -247,6 +247,182 @@ Si un evaluador pregunta "¿por qué X no está implementado?", la respuesta est
 
 ---
 
+## 11. Roadmap hacia producción real
+
+Esta sección responde: *si este prototipo fuera a convertirse en un producto real con clientes pagando, ¿qué habría que hacer, en qué orden, y cuáles son los bloqueos reales?*
+
+### Lo que ya es production-ready sin cambios
+
+| Componente | Por qué es production-ready |
+|---|---|
+| Strategy pattern LLM (4 providers) | Solo cambiar keys en `.env`; routing por costo ya implementado |
+| Pipeline de dos puertas | Escala horizontalmente; sin estado compartido entre requests |
+| Memoria dual con pgvector | Supabase maneja la carga; índices HNSW ya configurados |
+| RLS multi-tenant | Defendido a nivel de base de datos, no solo en código |
+| `agent_runs` observabilidad | ROI computable por tenant desde el día 1 |
+| Evaluator pre-filter | Reglas determinísticas que no dependen de un LLM externo |
+
+---
+
+### Fase 0 — Infra base (2-4 semanas)
+
+**Objetivo:** exponer el sistema a internet con seguridad mínima.
+
+**1. Autenticación en la API**
+Todos los endpoints son públicos en el prototipo. En producción: API keys por tenant con middleware FastAPI. Sin esto no se puede exponer a internet. Alternativa más robusta: OAuth 2.0 con Supabase Auth.
+
+**2. Deployment real**
+El `uvicorn` local no sirve para producción. Stack mínimo:
+- Gunicorn + múltiples workers Uvicorn workers
+- Railway, Fly.io, o un VPS en GCP/AWS
+- Nginx o Caddy como reverse proxy
+- SSL automático (Let's Encrypt)
+
+**3. Advisory lock distribuido**
+El `asyncio.Lock` in-memory del prototipo no funciona con múltiples workers. Reemplazar con:
+- `pg_advisory_xact_lock(hashtext('conv:' || conversation_id::text))` en Supabase, o
+- Redis Redlock para lock distribuido multi-proceso
+
+**4. Event Bus real (eliminar latencia bloqueante)**
+Hoy `POST /events/reply` bloquea 5-15 segundos mientras corre el pipeline completo. En producción el endpoint debe retornar 202 inmediato y procesar en background. Opciones por complejidad creciente:
+- **Supabase Realtime** — workers Python suscritos a cambios en `events_outbox` (ya tienes Supabase, cero infra nueva)
+- **Redis Streams + ARQ** — más control, requiere Redis
+- **Celery + RabbitMQ** — más maduro, más operacional
+
+**5. Secretos en vault**
+El `.env` en el servidor no escala. AWS Secrets Manager, GCP Secret Manager, Doppler, o 1Password Secrets Automation.
+
+---
+
+### Fase 1 — Canales reales (2-6 meses)
+
+Esta es la fase más lenta. Los canales definen si el producto puede existir.
+
+#### LinkedIn — el cuello de botella crítico
+
+LinkedIn tiene API oficial para mensajería, pero requiere **LinkedIn Marketing Developer Platform partnership**:
+1. Aplicar en `developer.linkedin.com` con caso de uso detallado
+2. Revisión manual por LinkedIn (SDRs automatizados es un caso sensible)
+3. Aprobación: entre 4 semanas y nunca — LinkedIn es muy restrictivo
+4. Costo: el acceso a mensajería no está en el plan gratuito
+
+**Alternativa pragmática para early stage:** integrar con herramientas ya aprobadas por LinkedIn (Lemlist, Instantly.ai, Expandi, La Growth Machine). Zolvo se conecta vía su API/webhook en lugar de ir directo a LinkedIn. Resuelve el bloqueo en semanas. El `LinkedInMockAdapter` se reemplaza por el SDK de la herramienta — una línea en `deps.py`.
+
+#### Email — trivial
+
+- SendGrid, Postmark, o Resend — setup en 1 día
+- Reemplazar `EmailMockAdapter` con el SDK del provider elegido
+- Configurar SPF/DKIM/DMARC en el dominio del cliente (crítico para deliverability)
+- Manejar bounces y unsubscribes (legalmente requerido en México)
+
+#### Slack — fácil
+
+- Slack App con `incoming_webhooks` scope — medio día
+- Reemplazar `SlackStub` con llamadas al webhook real
+
+#### Google Calendar — Scheduler Agent completo
+
+El que más falta hace para cerrar el ciclo de meeting booking:
+1. Google Cloud project + OAuth 2.0 credentials
+2. Flujo de autorización por cliente (cada cliente de Zolvo autoriza su propio Calendar)
+3. Implementar `SchedulerAgent(AgentBase)` con `GoogleCalendarAdapter`
+4. Parser de intent secundario: texto "el jueves a las 3pm" → `datetime` → verificar disponibilidad → crear evento → enviar `.ics`
+5. Estado `scheduling` activo en la máquina de estados
+
+Esfuerzo estimado: 2-3 semanas. Sin bloqueos de aprobación como LinkedIn.
+
+---
+
+### Fase 2 — Enrichment real (paralelo a Fase 1)
+
+El `ResearcherAgent` infiere datos con LLM sobre el nombre/empresa/rol que ya tienes. Introduce riesgo de alucinación en datos factuales (headcount inventado, funding incorrecto).
+
+**Stack de enrichment por costo/calidad:**
+
+| Fuente | Costo | Calidad para México | Setup |
+|---|---|---|---|
+| Apollo.io | $99+/mes | Alta — buena cobertura B2B LATAM | 1 día |
+| Clearbit | Variable por lookup | Alta | 1 día |
+| Hunter.io | $49+/mes | Media — emails principalmente | 1 día |
+| ZoomInfo | $15k+/año | Muy alta | Semanas (ventas) |
+
+**Arquitectura:** agregar `EnrichmentProvider` ABC con `ApolloProvider` como primera implementación. El Researcher llama primero al enrichment externo, luego usa el LLM solo para análisis cualitativo sobre datos ya verificados — no para inventar hechos.
+
+---
+
+### Fase 3 — Hardening de producción (1-2 meses)
+
+Lo que diferencia "funciona" de "puede tener clientes pagando":
+
+**Prompt management**
+Los prompts son archivos `.txt` en git. En producción: versionado con A/B testing por tenant, rollback instantáneo, métricas de performance por versión. Herramientas: Langfuse, PromptLayer, o una tabla en Supabase con versiones.
+
+**LLM observability**
+Saber cuándo el modelo está alucinando a escala. Helicone o Langfuse integrado con `agent_runs`. Alertas cuando `confidence_score_avg` de un tenant cae bajo 0.65 durante 24h.
+
+**Rate limiting por prospect**
+No se puede contactar al mismo lead 10 veces/día. Redis counters por `(lead_id, channel, day)` con límites configurables por tenant. Verificar antes de cada envío.
+
+**Circuit breaker distribuido**
+El `CircuitBreaker` in-memory del prototipo no comparte estado entre workers. Reemplazar con Redis para que los 4 workers tengan la misma visión del estado de cada provider.
+
+**Opt-out global**
+Base de datos de emails/LinkedIn URLs que no deben ser contactados jamás. Verificación antes de cada envío. Legalmente requerido en México.
+
+**Human-in-the-loop para escalaciones**
+Hoy la escalación loguea en Slack. En producción: interfaz web donde el SDR ve drafts bloqueados, los edita y aprueba. Puede ser Retool en la fase inicial; luego una pantalla del dashboard propio.
+
+**Billing por tenant**
+`agent_runs.cost_usd` ya rastrea el costo de API por operación. Agregar Stripe encima para cobrar según consumo. El modelo de datos ya está listo.
+
+---
+
+### Fase 4 — Escala (cuando hay tracción)
+
+Solo importa si hay clientes y volumen real:
+
+- **Worker pool horizontal** — múltiples instancias procesando colas paralelas. Kubernetes o Railway autoscaling.
+- **Embedding cache** — no recalcular embeddings de leads que ya pasaron por el Researcher. TTL de 7 días en Redis.
+- **Modelo fine-tuned** — con 500+ conversaciones exitosas, fine-tunear un modelo propio para el ICP mexicano. Reduce costos ~10x y mejora tono cultural.
+- **Multi-canal por lead** — orquestar LinkedIn + email + WhatsApp en secuencia según comportamiento del prospecto.
+
+---
+
+### El bloqueo más subestimado: compliance legal
+
+En México aplica la **Ley Federal de Protección de Datos Personales en Posesión de Particulares (LFPDPPP)**:
+- Consentimiento para procesar datos personales de los prospectos (que no te dieron permiso explícito)
+- Aviso de privacidad por cada empresa cliente de Zolvo
+- Derechos ARCO (Acceso, Rectificación, Cancelación, Oposición) para los prospectos contactados
+- Posible registro ante el INAI si se procesan datos sensibles
+
+Zolvo procesa datos personales de terceros (prospectos) en nombre de sus clientes. Esto requiere un **Data Processing Agreement (DPA)** con cada cliente y un análisis legal del flujo de datos completo.
+
+**Cuándo atender esto:** antes del primer cliente pagando. Resolver compliance retroactivamente con 100 clientes es exponencialmente más caro.
+
+---
+
+### Resumen: tiempo y equipo para el primer cliente real
+
+```
+Semana 1-2 ── Autenticación API + deployment en servidor
+Semana 3-4 ── Email real (SendGrid) + Slack real + revisión legal LFPDPPP
+Mes 2      ── Google Calendar (Scheduler Agent completo)
+Mes 2-3    ── Apollo.io para enrichment verificado
+Mes 3-6    ── LinkedIn API o acuerdo con Lemlist/Instantly
+Continuo   ── Prompt optimization + observabilidad + billing
+```
+
+**Equipo mínimo viable:**
+- 1 backend engineer (Python async, FastAPI, Supabase)
+- 1 persona de GTM/partnerships (LinkedIn approval + compliance)
+
+Sin el segundo perfil, el canal principal (LinkedIn) puede tardar meses en desbloquearse independientemente de la calidad del código.
+
+**Costo de infra para el primer cliente:** ~$150-300/mes (Railway/Fly + Supabase pro + Apollo starter + LLM APIs). Escala linealmente con el volumen de leads procesados por mes.
+
+---
+
 **Autor:** Stiven Yepes Vanegas
 **Fecha:** 24 de mayo de 2026
-**Última actualización:** corte de prototipo para entrega del reto Coding Fellowship · Makers Admission 2026-2
+**Última actualización:** roadmap de producción agregado post-entrega · Makers Admission 2026-2
