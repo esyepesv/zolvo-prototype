@@ -24,6 +24,10 @@ ENV/
 # MCP config (may contain access tokens)
 .mcp.json
 
+# Claude Code / FleetView task tracking (agent-internal, not project state)
+.antigravitycli/
+.claude/settings.local.json
+
 # Tooling caches
 .ruff_cache/
 .pytest_cache/
