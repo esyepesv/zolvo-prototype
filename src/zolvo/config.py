@@ -27,8 +27,9 @@ class Settings(BaseSettings):
 
     # Pipeline thresholds
     confidence_threshold: float = Field(default=0.70, ge=0.0, le=1.0)
-    debounce_min_seconds: int = Field(default=30, ge=0)
-    debounce_max_seconds: int = Field(default=90, ge=0)
+    # Demo defaults (3-7s). Production: DEBOUNCE_MIN_SECONDS=30, DEBOUNCE_MAX_SECONDS=90
+    debounce_min_seconds: int = Field(default=3, ge=0)
+    debounce_max_seconds: int = Field(default=7, ge=0)
 
     # LLM routing
     preferred_llm_provider: str = Field(default="openrouter")

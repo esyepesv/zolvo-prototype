@@ -12,6 +12,7 @@ from zolvo.llm.base import (
     LLMResponse,
     TaskType,
 )
+from zolvo.llm.circuit_breaker import CircuitBreaker, CircuitOpenError
 from zolvo.llm.ollama_provider import OllamaProvider
 from zolvo.llm.openai_provider import OpenAIProvider
 from zolvo.llm.openrouter_provider import OpenRouterProvider
@@ -24,7 +25,7 @@ class LLMGateway:
 
     Provider priority:
       1. preferred_llm_provider from settings (if configured and key present)
-      2. Any other available provider as fallback
+      2. Any other available provider as fallback (skipping providers with open circuits)
     """
 
     def __init__(
@@ -32,6 +33,7 @@ class LLMGateway:
     ) -> None:
         self._settings = settings
         self._providers: dict[str, LLMProvider] = {}
+        self._breakers: dict[str, CircuitBreaker] = {}
         self._setup_providers()
         if extra_providers:
             self._providers.update(extra_providers)
@@ -56,8 +58,29 @@ class LLMGateway:
         max_tokens: int = 1024,
         temperature: float = 0.7,
     ) -> LLMResponse:
-        """Send a completion request via the selected provider."""
+        """Send a completion request via the selected provider, with circuit breaker protection."""
         provider = self._select_provider(task_type)
+        provider_name = provider.provider_name
+        breaker = self._breakers.setdefault(provider_name, CircuitBreaker())
+
+        try:
+            breaker.before_call(provider_name)
+        except CircuitOpenError:
+            # Preferred provider circuit is open — try any available alternative
+            for name, alt in self._providers.items():
+                alt_breaker = self._breakers.setdefault(name, CircuitBreaker())
+                if alt_breaker.state != "open":
+                    log.warning(
+                        "llm.gateway.circuit_bypass",
+                        failed=provider_name,
+                        using=name,
+                        task_type=task_type,
+                    )
+                    provider, provider_name, breaker = alt, name, alt_breaker
+                    break
+            else:
+                raise LLMProviderError("All LLM providers have open circuit breakers.")
+
         request = LLMRequest(
             prompt=prompt,
             task_type=task_type,
@@ -65,8 +88,20 @@ class LLMGateway:
             max_tokens=max_tokens,
             temperature=temperature,
         )
-        log.debug("llm.gateway.routing", provider=provider.provider_name, task_type=task_type)
-        return await provider.complete(request)
+        log.debug("llm.gateway.routing", provider=provider_name, task_type=task_type)
+        try:
+            result = await provider.complete(request)
+            breaker.record_success()
+            return result
+        except LLMProviderError as exc:
+            breaker.record_failure()
+            log.warning(
+                "llm.gateway.provider_failure",
+                provider=provider_name,
+                failures=breaker._failures,
+                error=str(exc),
+            )
+            raise
 
     async def embed(self, text: str) -> EmbeddingResponse:
         """Generate a text embedding. Tries providers in priority order until one succeeds."""

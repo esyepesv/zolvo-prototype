@@ -20,9 +20,9 @@
 | Researcher Agent | ⚠️ Implementado sin fuentes externas | Media |
 | Conversationalist (multi-turn) | ✅ Implementado completo | — |
 | Scheduler Agent | ❌ Absorbido por Conversationalist | **Alta** |
-| Debouncing + Advisory Lock (ADR-06) | ❌ No implementado | **Alta** |
+| Debouncing + Advisory Lock (ADR-06) | ⚠️ Debounce implementado (jitter async), sin advisory lock | Media |
 | Event Bus async (ADR-03) | ❌ Reemplazado por HTTP síncrono | Media |
-| Circuit breaker (ADR-01) | ❌ Solo retries con backoff | Media |
+| Circuit breaker (ADR-01) | ✅ Implementado (in-memory, per-provider) | — |
 | Re-engagement de leads `dormant` | ❌ Estado definido, no automatizado | Baja |
 | Objection Handler especializado | ❌ Absorbido por Conversationalist | Baja |
 | Canales reales (LinkedIn/Email/Calendar) | ❌ Mocks con logs estructurados | Por diseño |
@@ -32,27 +32,18 @@
 
 ## 2. Brechas de alta severidad
 
-### 2.1 Debouncing + Advisory Lock (ADR-06) — no implementado
+### 2.1 Debouncing + Advisory Lock (ADR-06) — debounce implementado, advisory lock pendiente
 
-**Lo que dice el diseño:** ADR-06 argumenta que el debouncing (30–90s con jitter) y el `pg_advisory_xact_lock(lead_id)` son los mecanismos que convierten la latencia en feature de humanización y eliminan race conditions en mensajes concurrentes del mismo lead. El propio ADR afirma que **respuestas instantáneas delatan al bot**.
+**Lo que dice el diseño:** ADR-06 argumenta que el debouncing (30–90s con jitter) y el `pg_advisory_xact_lock(lead_id)` son los mecanismos que convierten la latencia en feature de humanización y eliminan race conditions en mensajes concurrentes del mismo lead.
 
-**Lo que hace el código:** procesamiento síncrono inmediato. Cada `POST /events/reply` arranca el pipeline al instante. No hay timer ni lock.
+**Lo que hace el código (implementado):** `POST /events/reply` persiste el mensaje inbound inmediatamente, luego espera `asyncio.sleep(random.uniform(debounce_min, debounce_max))` antes de lanzar el pipeline. El delay se loguea con structlog (`debounce.waiting delay_seconds=X.X`). Valores configurables: `DEBOUNCE_MIN_SECONDS`, `DEBOUNCE_MAX_SECONDS` (demo default: 3–7s; producción: 30–90s).
 
-**Por qué se dejó fuera:**
-- Debouncing real requiere un worker con timer reset (Celery, ARQ, o similar) y un event store de mensajes pendientes por lead. Esto duplica el alcance de infra para una mejora de UX que en el demo no es visible.
-- Advisory lock requiere que múltiples workers compitan por el mismo evento. En el prototipo single-worker no hay contención que resolver.
+**Lo que falta:** `pg_advisory_xact_lock` para race conditions reales. Si dos requests llegan en paralelo para el mismo `lead_id`, ambos superan el debounce y el pipeline corre dos veces concurrentemente.
 
-**Impacto real:**
-- En el demo, las respuestas salen instantáneas. Esto **es contradictorio con el propio ADR-06** y un evaluador detallista lo va a notar.
-- En producción real, sin debouncing, el sistema sí se vería como bot.
-
-**Qué requiere para producción:**
-- Worker con cola FIFO por `lead_id` (Redis Streams, ARQ, o Postgres LISTEN/NOTIFY)
-- Timer reset con jitter aleatorio configurable por canal
-- `pg_advisory_xact_lock(hashtext('lead:' || lead_id))` antes de procesar
+**Qué requiere para producción (la parte pendiente):**
+- `pg_advisory_xact_lock(hashtext('lead:' || lead_id::text))` dentro de la transacción antes de procesar
+- O bien: cola FIFO por `lead_id` (Redis Streams, ARQ) que garantice procesamiento serial por lead
 - Métrica: `time_to_response_ms_avg` por canal y horario
-
-**Mitigación corto plazo (que NO se hizo por tiempo):** un `asyncio.sleep(random.uniform(30, 90))` antes de procesar habría dado la apariencia sin el rigor. Se rechazó porque el demo sería más lento sin valor real.
 
 ---
 
@@ -127,17 +118,11 @@
 
 ---
 
-### 3.3 Circuit breaker (ADR-01) — solo retries con backoff
+### 3.3 Circuit breaker (ADR-01) — implementado ✅
 
 **Diseño:** ADR-01 menciona circuit breaker para protección ante caídas de proveedores LLM.
 
-**Código:** los providers usan `tenacity` con `stop_after_attempt(3)` y `wait_exponential`. **No hay circuit breaker que abra el circuito tras N fallos consecutivos.**
-
-**Diferencia práctica:**
-- Con retries solamente, si OpenRouter está caído, cada request lo intenta 3 veces antes de fallar → 9 llamadas perdidas en 3 requests consecutivos
-- Con circuit breaker, después de N fallos, el circuito se abre por T segundos y todos los requests fallan rápido o van a fallback
-
-**Qué requiere:** `pybreaker` o `aiocircuitbreaker` envolviendo `LLMGateway.complete()` con threshold configurable. El fallback existente (probar siguiente provider) ya está implementado en el gateway; el circuit breaker complementaría con dedupe temporal.
+**Código:** `src/zolvo/llm/circuit_breaker.py` implementa un circuit breaker in-memory por provider con tres estados (closed → open → half-open). `LLMGateway.complete()` lo consulta antes de cada llamada: si el circuito está abierto, intenta automáticamente el siguiente provider disponible. Los fallos sucesivos (`failure_threshold=3`) abren el circuito por `recovery_timeout=60s`, luego pasa a half-open para probar recuperación.
 
 ---
 
@@ -229,13 +214,14 @@ Si tuviera 1 semana más de desarrollo, este es el orden de implementación:
 
 | Día | Brecha | Razón de prioridad |
 |---|---|---|
-| 1 | Debouncing real con jitter + advisory lock | Cierra la contradicción más visible (ADR-06 vs demo) |
+| ✅ | Debouncing con jitter | Implementado — falta advisory lock para race conditions reales |
+| ✅ | Circuit breaker in-memory | Implementado — falta estado distribuido (Redis) para multi-worker |
+| 1 | Advisory lock (`pg_advisory_xact_lock`) | Cierra la parte faltante del ADR-06 |
 | 1-2 | Scheduler Agent + Google Calendar real | El brief pide book meetings — sin esto, el sistema queda incompleto |
 | 2-3 | Event Bus async + outbox pattern | Habilita escalabilidad real y elimina latencia bloqueante |
 | 3-4 | Researcher con Apollo/Clearbit | Sin enrichment real, el copy puede tener datos inventados |
-| 4-5 | Circuit breaker + observabilidad de fallos | Producción exige resiliencia, no solo retries |
-| 5-6 | Re-engagement de `dormant` + objection handler | Refinamientos del funnel |
-| 6-7 | Tests de carga, auditoría manual de mensajes, hardening | Pre-producción |
+| 4-5 | Re-engagement de `dormant` + objection handler | Refinamientos del funnel |
+| 5-6 | Tests de carga, auditoría manual de mensajes, hardening | Pre-producción |
 
 ---
 
