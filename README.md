@@ -57,33 +57,70 @@ Con la API corriendo en otra terminal:
 PYTHONPATH=src .venv/bin/python demo/run_happy_path.py
 ```
 
-Flujo completo en ~30s:
+Flujo completo en ~45s, con output visual usando `rich`:
 
 ```
-STEP 1: Ingest Lead
+╭─────────────────────────────────────────────────────────╮
+│    ZOLVO AI SALES ENGINE                                │
+│    Demo End-to-End · Happy Path · Fintech B2B México    │
+╰─────────────────────────────────────────────────────────╯
+
+──────────────────── STEP 1 — Ingest Lead ────────────────────
+
   Lead : Diego Ramírez — CTO @ CredIMex
-  ✓ Subject: [mensaje outbound generado]
-  ✓ Body:    [cuerpo personalizado con hooks del ICP]
 
-STEP 2: Turn 1 — Interés inicial
-  Intent  : meeting_intent
-  Action  : ✓ SEND  (score: 0.900)  [8.2s]
-  Draft:  [respuesta generada con memoria dual]
+  ✓ lead_id          b2000fc9-62f3-...
+  ✓ conversation_id  babcedc9-fc82-...
+  ✓ elapsed          13.7s
 
-STEP 3: Turn 2 — Objeción de precio
-  Intent  : objection_price
-  Action  : ✓ SEND  (score: 0.867)  [7.1s]
+╭──────────────── Outbound Message ──────────────────╮
+│ Subject: Diego, ¿cómo escalan el outreach...       │
+│                                                    │
+│ Hola Diego, vi que eres CTO en CredIMex...         │
+╰────────────────────────────────────────────────────╯
 
-STEP 4: Turn 3 — Intent de meeting
-  Intent  : meeting_intent
-  Action  : ✓ SEND  (score: 0.900)  [6.8s]
+──────────── STEP 2 — Turn 1 — Interés inicial ───────────────
 
-PIPELINE SUMMARY
-  Intent path  : meeting_intent → objection_price → meeting_intent
-  Action path  : send → send → send
-  Avg conf score: 0.889
-  Stages: ingest → classify → generate → evaluate → route  ✓
+╭─── PROSPECT ───╮
+│ Hola, me llegó tu mensaje. Estamos evaluando...   │
+╰────────────────╯
+  Intent  meeting_intent
+  Action  ✓ SEND   score 0.900   [9.1s]
+
+╭─── Agent Reply ───╮
+│ Perfecto, me da gusto que te interese...          │
+╰───────────────────╯
+
+──────────── STEP 3 — Turn 2 — Objeción de precio ────────────
+
+  Intent  objection_price
+  Action  ✓ SEND   score 0.867   [9.4s]
+
+──────────── STEP 4 — Turn 3 — Intent de meeting ─────────────
+
+  Intent  meeting_intent
+  Action  ↑ ESCALATE   score 0.500   [9.5s]   ← Gate 2 bloqueó
+
+──────────────────── PIPELINE SUMMARY ───────────────────────
+
+╭────────┬──────────────────────┬──────────────┬─────────┬────────┬────────╮
+│  Turn  │ Intent               │   Action     │  Score  │ Gate 1 │ Gate 2 │
+├────────┼──────────────────────┼──────────────┼─────────┼────────┼────────┤
+│   1    │ meeting_intent       │   ✓ SEND     │  0.900  │  PASS  │  PASS  │
+│   2    │ objection_price      │   ✓ SEND     │  0.867  │  PASS  │  PASS  │
+│   3    │ meeting_intent       │  ↑ ESCALATE  │  0.500  │  PASS  │  BLOCK │
+╰────────┴──────────────────────┴──────────────┴─────────┴────────┴────────╯
+
+  Intent path       meeting_intent → objection_price → meeting_intent
+  Avg conf score    0.756
+  Sends / Escalations / Handoffs   2 / 1 / 0
+
+╭────────────────────────────────────────────────────╮
+│  ingest → classify → generate → evaluate → route ✓ │
+╰────────────────────────────────────────────────────╯
 ```
+
+El Turn 3 muestra `↑ ESCALATE` porque el Evaluator (Gate 2) calculó score 0.500 < umbral 0.70 — el borrador no superó el gate de calidad y queda para revisión humana. Esto demuestra que el sistema no envía todo automáticamente.
 
 ### Métricas post-demo
 
@@ -211,7 +248,7 @@ El script ejecuta este escenario automáticamente:
 | Ingest | Lead Diego Ramírez (CTO @ CredIMex) es creado, enriquecido por el Researcher, y el Copywriter genera el primer mensaje outbound | Subject + body del mensaje inicial |
 | Turn 1 | Prospecto responde con interés y pide una llamada | Intent: `meeting_intent` → Action: `✓ SEND` + borrador de respuesta |
 | Turn 2 | Prospecto objeta el precio ("somos una startup de 30 personas") | Intent: `objection_price` → Action: `✓ SEND` + respuesta que maneja la objeción |
-| Turn 3 | Prospecto confirma meeting ("¿pueden el jueves o viernes?") | Intent: `meeting_intent` → Action: `✓ SEND` + respuesta que confirma |
+| Turn 3 | Prospecto confirma meeting ("¿pueden el jueves o viernes?") | Intent: `meeting_intent` → Gate 2 puede bloquear si el score < 0.70 → `↑ ESCALATE` o `✓ SEND` |
 | Summary | Resumen del pipeline | Intent path, action path, confidence scores |
 
 ### Paso 2 — Mostrar métricas en Supabase
