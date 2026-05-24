@@ -93,7 +93,187 @@ Pegar `demo/metrics.sql` en el SQL Editor de Supabase para ver:
 - Distribución de intents detectados
 - Totales del pipeline
 
-## Stack
+---
+
+## Cómo funciona el sistema
+
+El sistema es un **pipeline de ventas outbound completamente automatizado**. Toma un lead (nombre, empresa, rol) y lleva la conversación desde el primer mensaje hasta detectar cuándo el prospecto quiere una reunión — sin intervención humana salvo en casos que lo requieran.
+
+### Los agentes
+
+| Agente | Qué hace | Modelo usado |
+|---|---|---|
+| **Researcher** | Analiza al lead y genera un perfil de ICP: fit, pain points, hooks de conversación, tamaño de empresa. Guarda un embedding semántico para RAG. | `claude-haiku-4.5` (barato) |
+| **Copywriter** | Genera el primer mensaje outbound: subject + body personalizados con los hooks del Researcher. Devuelve JSON `{subject, body, channel}`. | `claude-haiku-4.5` |
+| **IntentClassifier** | Clasifica cada respuesta del prospecto en una de 9 categorías. Decide si el agente puede responder o si se necesita un humano. | `claude-haiku-4.5` (temperatura 0.1) |
+| **Conversationalist** | Genera la respuesta multi-turn. Usa memoria dual: los últimos 15 mensajes del hilo + búsqueda semántica en embeddings históricos. Adapta el tono según el intent detectado. | `claude-haiku-4.5` |
+| **Evaluator** | Evalúa el borrador antes de enviarlo en 3 ejes: naturalidad (¿suena humano?), relevancia (¿responde al intent?), riesgo (¿podría dañar la relación?). Bloquea el envío si el score es bajo. | `claude-haiku-4.5` (temperatura 0) |
+
+### Las 9 categorías de intent
+
+| Intent | Descripción | ¿Handoff? |
+|---|---|---|
+| `interested` | Interés general, quiere saber más | No — el agente responde |
+| `objection_price` | Objeción de precio o presupuesto | No — el agente negocia |
+| `objection_authority` | No tiene poder de decisión | No — el agente educa |
+| `objection_timing` | No es el momento adecuado | No — el agente trabaja el timing |
+| `meeting_intent` | Quiere agendar una llamada o demo | No — el agente confirma |
+| `complaint` | Queja o experiencia negativa | **Sí** → humano |
+| `complex_technical` | Pregunta técnica profunda fuera del alcance | **Sí** → humano |
+| `out_of_scope` | No relacionado con el producto | **Sí** → humano |
+| `opt_out` | Quiere que no le escriban más | **Sí** → humano |
+
+### El pipeline de dos puertas
+
+Cada respuesta del prospecto pasa por dos puertas antes de que el agente responda:
+
+```
+Respuesta del prospecto
+        │
+        ▼
+  ┌─────────────────┐
+  │  PUERTA 1       │  IntentClassifier
+  │  Intent Check   │  ¿puede el agente manejar esto?
+  └─────────────────┘
+        │
+        ├── should_handoff=True ──────────────────→ HANDOFF
+        │                                           (acción: "handoff")
+        │
+        └── should_handoff=False
+                │
+                ▼
+         Conversationalist
+         (short-term: últimos 15 msgs)
+         (long-term: pgvector similarity search)
+                │
+                ▼ borrador generado
+        ┌─────────────────┐
+        │  PUERTA 2       │  EvaluatorAgent
+        │  Quality Gate   │  score = (naturalidad + relevancia + (1−riesgo)) / 3
+        └─────────────────┘
+                │
+                ├── score ≥ 0.70 ──→ SEND      (mensaje persistido + enviado)
+                └── score < 0.70 ──→ ESCALATE  (borrador guardado para revisión)
+```
+
+### La memoria dual
+
+El Conversationalist tiene dos capas de memoria:
+
+- **Short-term (textual):** los últimos 15 mensajes del hilo actual. Se pasan directamente al prompt como contexto de conversación. Costo: cero (ya están en DB).
+- **Long-term (semántica):** búsqueda vectorial en pgvector. Al generar la respuesta, se embeddea el mensaje del prospecto y se buscan:
+  - **`lead_embeddings`** — perfil semántico del lead generado por el Researcher.
+  - **`conversation_summaries_embeddings`** — resúmenes de conversaciones anteriores con este u otros leads del tenant.
+  
+  Esto permite que el agente "recuerde" contexto de interacciones previas aunque no estén en el hilo actual.
+
+### Observabilidad: la tabla `agent_runs`
+
+Cada vez que un agente corre, registra una fila en `agent_runs` con:
+- `agent_name` — qué agente fue
+- `tokens_in / tokens_out` — consumo exacto de tokens
+- `cost_usd` — costo calculado por el provider
+- `latency_ms` — tiempo de respuesta del LLM
+- `input_payload / output_payload` — qué recibió y qué devolvió
+- `llm_provider / llm_model` — qué modelo se usó en esta llamada
+
+Esto permite auditar el costo por conversación, detectar agentes lentos, y comparar modelos.
+
+---
+
+## Guía de la demo
+
+### Preparación (hacer antes de grabar)
+
+```bash
+# Terminal 1 — la API debe estar corriendo
+PYTHONPATH=src .venv/bin/uvicorn zolvo.api.main:app --reload
+
+# Verificar que responde
+curl http://localhost:8000/health
+# → {"status":"ok","env":"dev"}
+
+# Verificar Swagger UI
+# Abrir http://localhost:8000/docs en el navegador
+```
+
+### Paso 1 — Correr el happy path
+
+```bash
+# Terminal 2
+PYTHONPATH=src .venv/bin/python demo/run_happy_path.py
+```
+
+El script ejecuta este escenario automáticamente:
+
+| Paso | Qué pasa | Qué se ve en consola |
+|---|---|---|
+| Ingest | Lead Diego Ramírez (CTO @ CredIMex) es creado, enriquecido por el Researcher, y el Copywriter genera el primer mensaje outbound | Subject + body del mensaje inicial |
+| Turn 1 | Prospecto responde con interés y pide una llamada | Intent: `meeting_intent` → Action: `✓ SEND` + borrador de respuesta |
+| Turn 2 | Prospecto objeta el precio ("somos una startup de 30 personas") | Intent: `objection_price` → Action: `✓ SEND` + respuesta que maneja la objeción |
+| Turn 3 | Prospecto confirma meeting ("¿pueden el jueves o viernes?") | Intent: `meeting_intent` → Action: `✓ SEND` + respuesta que confirma |
+| Summary | Resumen del pipeline | Intent path, action path, confidence scores |
+
+### Paso 2 — Mostrar métricas en Supabase
+
+Después de correr el demo, abrir el **SQL Editor** en supabase.com y pegar el contenido de `demo/metrics.sql`. Ejecutar cada query por separado para mostrar:
+
+**Query 1 — Costo por agente:**
+```sql
+-- muestra: researcher, copywriter, conversationalist, evaluator, intent_classifier
+-- columnas: runs, tokens_in, tokens_out, total_cost_usd, avg_latency_ms
+```
+
+**Query 2 — Confidence scores del Evaluator:**
+```sql
+-- muestra: score numérico + should_send por cada evaluación
+-- permite ver que todos los drafts pasaron el gate (score > 0.70)
+```
+
+**Query 3 — Distribución de intents:**
+```sql
+-- muestra: meeting_intent x2, objection_price x1
+-- evidencia que el clasificador funcionó correctamente
+```
+
+**Query 4 — Totales del pipeline:**
+```sql
+-- muestra: 1 lead, 1 conversación, 3 mensajes inbound, 3 outbound, costo total USD
+```
+
+### Paso 3 — Mostrar la API en Swagger (opcional)
+
+Abrir `http://localhost:8000/docs` y ejecutar manualmente un `POST /agents/ingest` con un lead diferente para mostrar el sistema en tiempo real.
+
+Payload de ejemplo para Swagger:
+```json
+{
+  "tenant_id": "00000000-0000-0000-0000-000000000001",
+  "full_name": "Ana Torres",
+  "email": "ana.torres@fintechpyme.mx",
+  "company": "FintechPyme",
+  "role": "CEO",
+  "source": "linkedin",
+  "channel": "linkedin"
+}
+```
+
+### Qué mostrar en los logs (Terminal 1)
+
+Mientras corre el demo, la API imprime logs estructurados en tiempo real. Los más relevantes para la demo:
+
+```
+researcher.completed    lead_id=... icp_fit=alto embedding_saved=True cost_usd=0.000312
+copywriter.completed    lead_id=... channel=email subject="..." cost_usd=0.000089
+intent_classifier.classified  intent=meeting_intent should_handoff=False confidence=0.95
+conversationalist.completed   conversation_id=... cost_usd=0.000421 latency_ms=3241
+evaluator.completed     score=0.9 should_send=True latency_ms=1823
+orchestrator.evaluated  score=0.9 should_send=True
+```
+
+Estos logs evidencian que cada componente del pipeline corre de forma independiente, con su propio modelo y su propio registro de costos.
+
+---
 
 | Capa | Tecnología |
 |---|---|
