@@ -1,0 +1,81 @@
+{
+  "id": "LDjEhcuc7DMNRywX",
+  "name": "Zolvo \u2014 Reply Received",
+  "nodes": [
+    {
+      "id": "r1",
+      "name": "Webhook \u2014 Reply",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "path": "zolvo-reply",
+        "responseMode": "lastNode",
+        "httpMethod": "POST"
+      },
+      "webhookId": "zolvo-reply"
+    },
+    {
+      "id": "r2",
+      "name": "POST /events/reply",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/events/reply",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "r3",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook \u2014 Reply": {
+      "main": [
+        [
+          {
+            "node": "POST /events/reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /events/reply": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

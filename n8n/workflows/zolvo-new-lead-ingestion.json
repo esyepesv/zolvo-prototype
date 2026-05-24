@@ -1,0 +1,81 @@
+{
+  "id": "5VEfQA0VC44iM6Zs",
+  "name": "Zolvo \u2014 New Lead Ingestion",
+  "nodes": [
+    {
+      "id": "n1",
+      "name": "Webhook \u2014 New Lead",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "path": "zolvo-new-lead",
+        "responseMode": "lastNode",
+        "httpMethod": "POST"
+      },
+      "webhookId": "zolvo-new-lead"
+    },
+    {
+      "id": "n2",
+      "name": "POST /agents/ingest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        480,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/agents/ingest",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.body) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n3",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        720,
+        300
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook \u2014 New Lead": {
+      "main": [
+        [
+          {
+            "node": "POST /agents/ingest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /agents/ingest": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
