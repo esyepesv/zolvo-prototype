@@ -5,7 +5,8 @@ import uuid
 from fastapi import APIRouter, Depends
 from supabase import AsyncClient
 
-from zolvo.api.deps import get_supabase
+from zolvo.api.deps import get_conv_repo, get_supabase
+from zolvo.repositories.conversations import ConversationRepository
 
 router = APIRouter(prefix="/operator", tags=["operator"])
 
@@ -19,7 +20,9 @@ async def operator_dashboard(
     tid = str(tenant_id)
 
     leads_resp = await supabase.table("leads").select("id").eq("tenant_id", tid).execute()
-    convs_resp = await supabase.table("conversations").select("id").eq("tenant_id", tid).execute()
+    convs_resp = (
+        await supabase.table("conversations").select("id, status").eq("tenant_id", tid).execute()
+    )
     msgs_resp = (
         await supabase.table("messages").select("direction").eq("tenant_id", tid).execute()
     )
@@ -34,6 +37,12 @@ async def operator_dashboard(
     total_conversations = len(convs_resp.data)
     inbound = sum(1 for m in msgs_resp.data if m["direction"] == "inbound")
     outbound = sum(1 for m in msgs_resp.data if m["direction"] == "outbound")
+
+    # State machine breakdown — shows the funnel in real time.
+    status_breakdown: dict[str, int] = {}
+    for conv in convs_resp.data:
+        s = conv.get("status", "unknown")
+        status_breakdown[s] = status_breakdown.get(s, 0) + 1
 
     total_cost = 0.0
     intent_distribution: dict[str, int] = {}
@@ -61,6 +70,7 @@ async def operator_dashboard(
             "messages_inbound": inbound,
             "messages_outbound": outbound,
         },
+        "status_breakdown": status_breakdown,
         "quality_gates": {
             "pending_escalations": pending_escalations,
         },
@@ -69,4 +79,29 @@ async def operator_dashboard(
             "by_agent": agent_cost,
         },
         "intent_distribution": intent_distribution,
+    }
+
+
+@router.get("/conversations")
+async def list_conversations_by_status(
+    tenant_id: uuid.UUID,
+    status: str = "dormant",
+    conv_repo: ConversationRepository = Depends(get_conv_repo),
+) -> dict:
+    """List conversations filtered by status. Useful for re-engagement queues."""
+    conversations = await conv_repo.get_by_status(tenant_id, status)
+    return {
+        "tenant_id": str(tenant_id),
+        "status": status,
+        "count": len(conversations),
+        "conversations": [
+            {
+                "id": str(c.id),
+                "lead_id": str(c.lead_id),
+                "channel": c.channel,
+                "status": c.status,
+                "created_at": str(c.created_at),
+            }
+            for c in conversations
+        ],
     }

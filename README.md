@@ -41,7 +41,7 @@ cp .env.example .env
 # 5. Verificar
 .venv/bin/ruff check .
 PYTHONPATH=src .venv/bin/pytest -q
-# → 54 passed
+# → 52 passed (unit); integration tests require live Supabase
 
 # 6. Levantar la API
 PYTHONPATH=src .venv/bin/uvicorn zolvo.api.main:app --host 0.0.0.0 --reload
@@ -240,7 +240,8 @@ Respuesta del prospecto
                 ▼ borrador generado
         ┌─────────────────┐
         │  PUERTA 2       │  EvaluatorAgent
-        │  Quality Gate   │  score = (naturalidad + relevancia + (1−riesgo)) / 3
+        │  Quality Gate   │  pre-filter (regex determinístico) → LLM score
+        │                 │  score = (naturalidad + relevancia + (1−riesgo)) / 3
         └─────────────────┘
                 │
                 ├── score ≥ 0.70 ──→ SEND      (LinkedIn mock: channel.linkedin.send)
@@ -277,6 +278,13 @@ El endpoint `GET /operator/dashboard?tenant_id=...` agrega métricas en tiempo r
     "messages_inbound": 17,
     "messages_outbound": 42
   },
+  "status_breakdown": {
+    "researching": 12,
+    "engaging": 65,
+    "closing": 8,
+    "handoff": 4,
+    "escalated": 2
+  },
   "quality_gates": {
     "pending_escalations": 1
   },
@@ -296,6 +304,8 @@ El endpoint `GET /operator/dashboard?tenant_id=...` agrega métricas en tiempo r
   }
 }
 ```
+
+El endpoint `GET /operator/conversations?tenant_id=...&status=dormant` lista conversaciones por estado para colas de re-engagement.
 
 ---
 

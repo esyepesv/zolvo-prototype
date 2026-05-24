@@ -150,3 +150,52 @@ async def test_configurable_threshold_passes_mediocre_draft() -> None:
     )
 
     assert result.should_send is True
+
+
+# ─── Pre-filter (hard rules) tests ────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_prefilter_blocks_forbidden_promise() -> None:
+    """Drafts with explicit guarantees are blocked before the LLM is called."""
+    agent, agent_run_repo = _make_agent()
+    result = await agent.evaluate(
+        draft="Te garantizamos un ROI de 300% en 6 meses.",
+        context=_CONTEXT,
+        conversation_id=_CONV_ID,
+        tenant_id=_TENANT,
+    )
+
+    assert result.should_send is False
+    assert result.score == 0.0
+    # LLM was NOT called — create called without tokens_in
+    call_kwargs = agent_run_repo.create.call_args.kwargs
+    assert "tokens_in" not in call_kwargs
+
+
+@pytest.mark.asyncio
+async def test_prefilter_blocks_excessive_length() -> None:
+    """Drafts exceeding max character limit are blocked without LLM call."""
+    agent, _ = _make_agent()
+    long_draft = "Hola, " + ("esto es muy largo. " * 100)  # > 1500 chars
+    result = await agent.evaluate(
+        draft=long_draft, context=_CONTEXT, conversation_id=_CONV_ID, tenant_id=_TENANT
+    )
+
+    assert result.should_send is False
+    assert result.score == 0.0
+    assert "caracteres" in result.reason
+
+
+@pytest.mark.asyncio
+async def test_prefilter_allows_clean_draft() -> None:
+    """A clean draft passes the pre-filter and reaches the LLM evaluator."""
+    agent, agent_run_repo = _make_agent(_GOOD_RESPONSE)
+    result = await agent.evaluate(
+        draft=_DRAFT, context=_CONTEXT, conversation_id=_CONV_ID, tenant_id=_TENANT
+    )
+
+    assert result.should_send is True
+    # LLM was called — tokens_in present in agent_run create call
+    call_kwargs = agent_run_repo.create.call_args.kwargs
+    assert call_kwargs.get("tokens_in", 0) > 0

@@ -20,7 +20,7 @@
 | Researcher Agent | ⚠️ Implementado sin fuentes externas | Media |
 | Conversationalist (multi-turn) | ✅ Implementado completo | — |
 | Scheduler Agent | ❌ Absorbido por Conversationalist | **Alta** |
-| Debouncing + Advisory Lock (ADR-06) | ⚠️ Debounce implementado (jitter async), sin advisory lock | Media |
+| Debouncing + Advisory Lock (ADR-06) | ✅ Implementado (jitter async + in-memory lock) | — |
 | Event Bus async (ADR-03) | ❌ Reemplazado por HTTP síncrono | Media |
 | Circuit breaker (ADR-01) | ✅ Implementado (in-memory, per-provider) | — |
 | Re-engagement de leads `dormant` | ❌ Estado definido, no automatizado | Baja |
@@ -32,18 +32,17 @@
 
 ## 2. Brechas de alta severidad
 
-### 2.1 Debouncing + Advisory Lock (ADR-06) — debounce implementado, advisory lock pendiente
+### 2.1 Debouncing + Advisory Lock (ADR-06) — implementado ✅
 
 **Lo que dice el diseño:** ADR-06 argumenta que el debouncing (30–90s con jitter) y el `pg_advisory_xact_lock(lead_id)` son los mecanismos que convierten la latencia en feature de humanización y eliminan race conditions en mensajes concurrentes del mismo lead.
 
-**Lo que hace el código (implementado):** `POST /events/reply` persiste el mensaje inbound inmediatamente, luego espera `asyncio.sleep(random.uniform(debounce_min, debounce_max))` antes de lanzar el pipeline. El delay se loguea con structlog (`debounce.waiting delay_seconds=X.X`). Valores configurables: `DEBOUNCE_MIN_SECONDS`, `DEBOUNCE_MAX_SECONDS` (demo default: 3–7s; producción: 30–90s).
+**Lo que hace el código:**
+- `POST /events/reply` persiste el mensaje inbound inmediatamente (antes del lock).
+- Adquiere un `asyncio.Lock` por `conversation_id` (módulo-level dict `_conv_locks`).
+- Dentro del lock: `asyncio.sleep(random.uniform(debounce_min, debounce_max))` con log estructurado.
+- El pipeline completo y el routing de canal corren dentro del lock — imposible procesar la misma conversación en paralelo en un solo proceso.
 
-**Lo que falta:** `pg_advisory_xact_lock` para race conditions reales. Si dos requests llegan en paralelo para el mismo `lead_id`, ambos superan el debounce y el pipeline corre dos veces concurrentemente.
-
-**Qué requiere para producción (la parte pendiente):**
-- `pg_advisory_xact_lock(hashtext('lead:' || lead_id::text))` dentro de la transacción antes de procesar
-- O bien: cola FIFO por `lead_id` (Redis Streams, ARQ) que garantice procesamiento serial por lead
-- Métrica: `time_to_response_ms_avg` por canal y horario
+**Limitación de producción:** `asyncio.Lock` es in-memory y single-process. En un deployment multi-worker (Gunicorn con varios workers), dos workers pueden adquirir locks distintos para el mismo `conversation_id`. Para multi-worker se necesita `pg_advisory_xact_lock` o Redis Distributed Lock (Redlock). En el prototipo single-worker con uvicorn, el lock es suficiente.
 
 ---
 

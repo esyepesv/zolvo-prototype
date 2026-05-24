@@ -10,6 +10,7 @@ from zolvo.agents.conversationalist import ConversationalistAgent
 from zolvo.agents.evaluator import EvaluatorAgent
 from zolvo.intent.classifier import IntentClassifier
 from zolvo.repositories.agent_runs import AgentRunRepository
+from zolvo.repositories.conversations import ConversationRepository
 
 log = structlog.get_logger(__name__)
 
@@ -36,11 +37,13 @@ class Orchestrator:
         conversationalist: ConversationalistAgent,
         evaluator: EvaluatorAgent,
         agent_run_repo: AgentRunRepository,
+        conv_repo: ConversationRepository | None = None,
     ) -> None:
         self._classifier = intent_classifier
         self._conversationalist = conversationalist
         self._evaluator = evaluator
         self._agent_run_repo = agent_run_repo
+        self._conv_repo = conv_repo
 
     async def handle_reply(
         self,
@@ -70,6 +73,8 @@ class Orchestrator:
         )
 
         if intent_result.should_handoff:
+            if self._conv_repo:
+                await self._conv_repo.update_status(conversation_id, "handoff")
             return OrchestratorResult(
                 action="handoff",
                 conversation_id=conversation_id,
@@ -108,6 +113,15 @@ class Orchestrator:
         )
 
         action: Action = "send" if eval_result.should_send else "escalate"
+
+        if self._conv_repo:
+            if action == "escalate":
+                await self._conv_repo.update_status(conversation_id, "escalated")
+            elif intent_result.intent == "meeting_intent":
+                await self._conv_repo.update_status(conversation_id, "closing")
+            else:
+                await self._conv_repo.update_status(conversation_id, "engaging")
+
         return OrchestratorResult(
             action=action,
             conversation_id=conversation_id,

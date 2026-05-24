@@ -23,6 +23,16 @@ from zolvo.schemas import ReplyRequest, ReplyResponse
 router = APIRouter(prefix="/events", tags=["events"])
 log = structlog.get_logger(__name__)
 
+# In-memory lock per conversation_id — prevents parallel processing of the same
+# conversation in a single-process deployment (ADR-06).
+_conv_locks: dict[str, asyncio.Lock] = {}
+
+
+def _get_conv_lock(conv_id: str) -> asyncio.Lock:
+    if conv_id not in _conv_locks:
+        _conv_locks[conv_id] = asyncio.Lock()
+    return _conv_locks[conv_id]
+
 
 @router.post("/reply", response_model=ReplyResponse)
 async def receive_reply(
@@ -35,7 +45,7 @@ async def receive_reply(
     """Receive an inbound reply → debounce → two-gate pipeline → route via channel or escalate."""
     settings = get_settings()
 
-    # Persist the inbound message before debounce so it is not lost if the process restarts.
+    # Persist the inbound message before acquiring the lock so it is never lost.
     await message_repo.create(
         tenant_id=body.tenant_id,
         conversation_id=body.conversation_id,
@@ -43,54 +53,53 @@ async def receive_reply(
         content=body.message,
     )
 
-    # ADR-06: debounce window before processing to consolidate rapid messages and
-    # produce human-like response timing.
-    if settings.debounce_max_seconds > 0:
-        delay = random.uniform(settings.debounce_min_seconds, settings.debounce_max_seconds)
-        log.info(
-            "debounce.waiting",
-            delay_seconds=round(delay, 1),
-            conversation_id=str(body.conversation_id),
-        )
-        await asyncio.sleep(delay)
-        log.info("debounce.ready", conversation_id=str(body.conversation_id))
+    # ADR-06: serialize processing per conversation and apply debounce jitter.
+    async with _get_conv_lock(str(body.conversation_id)):
+        if settings.debounce_max_seconds > 0:
+            delay = random.uniform(settings.debounce_min_seconds, settings.debounce_max_seconds)
+            log.info(
+                "debounce.waiting",
+                delay_seconds=round(delay, 1),
+                conversation_id=str(body.conversation_id),
+            )
+            await asyncio.sleep(delay)
+            log.info("debounce.ready", conversation_id=str(body.conversation_id))
 
-    result = await orchestrator.handle_reply(
-        conversation_id=body.conversation_id,
-        tenant_id=body.tenant_id,
-        message=body.message,
-    )
-
-    if result.action == "send" and result.draft:
-        await message_repo.create(
-            tenant_id=body.tenant_id,
+        result = await orchestrator.handle_reply(
             conversation_id=body.conversation_id,
-            direction="outbound",
-            content=result.draft,
-            generated_by_agent="conversationalist",
-            confidence_score=Decimal(str(round(result.confidence_score or 0, 4))),
-        )
-        # Simulate delivery via channel adapter (LinkedIn DM in this demo)
-        await linkedin.send_message(
-            to=str(body.conversation_id),
-            body=result.draft,
+            tenant_id=body.tenant_id,
+            message=body.message,
         )
 
-    elif result.action == "handoff":
-        await slack.notify_handoff(
-            conversation_id=str(body.conversation_id),
-            intent=result.intent,
-            reason=result.reason,
-        )
+        if result.action == "send" and result.draft:
+            await message_repo.create(
+                tenant_id=body.tenant_id,
+                conversation_id=body.conversation_id,
+                direction="outbound",
+                content=result.draft,
+                generated_by_agent="conversationalist",
+                confidence_score=Decimal(str(round(result.confidence_score or 0, 4))),
+            )
+            await linkedin.send_message(
+                to=str(body.conversation_id),
+                body=result.draft,
+            )
 
-    elif result.action == "escalate" and result.draft:
-        await slack.notify_escalation(
-            conversation_id=str(body.conversation_id),
-            intent=result.intent,
-            confidence_score=result.confidence_score or 0.0,
-            draft_preview=result.draft,
-            reason=result.reason,
-        )
+        elif result.action == "handoff":
+            await slack.notify_handoff(
+                conversation_id=str(body.conversation_id),
+                intent=result.intent,
+                reason=result.reason,
+            )
+
+        elif result.action == "escalate" and result.draft:
+            await slack.notify_escalation(
+                conversation_id=str(body.conversation_id),
+                intent=result.intent,
+                confidence_score=result.confidence_score or 0.0,
+                draft_preview=result.draft,
+                reason=result.reason,
+            )
 
     return ReplyResponse(
         action=result.action,

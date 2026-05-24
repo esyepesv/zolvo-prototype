@@ -15,7 +15,7 @@
 | Tiempo disponible | ~30h efectivas |
 | Hito actual | **Hito 12 — COMPLETADO** |
 | Próximo hito | — (todos los hitos completados) |
-| Último commit | `feat: persist intent_classifier runs to agent_runs for dashboard metrics` |
+| Último commit | `feat: advisory lock, evaluator pre-filter, state machine transitions, conversation status endpoint` |
 
 ---
 
@@ -331,7 +331,7 @@ bash scripts/verify.sh
 ## Estado final del proyecto — Definition of Done
 
 - [x] Hitos 0-12 completados
-- [x] `pytest -q` → 54 passed
+- [x] `pytest -q` → 52 passed (unit tests; integration tests requieren Supabase)
 - [x] `ruff check .` → All checks passed
 - [x] Demo end-to-end corre sin intervención manual (`python demo/run_happy_path.py`)
 - [x] README permite clonar, instalar y correr en < 10 min
@@ -342,6 +342,26 @@ bash scripts/verify.sh
 - [x] Código refleja las decisiones del documento de arquitectura
 
 **El video se puede grabar.**
+
+---
+
+### ✅ Post-Hito 12 — Cierre de brechas antes del video
+
+**Motivación:** dos evaluadores técnicos identificaron brechas entre la arquitectura documentada y el código. Se priorizaron las implementables sin riesgo en < 1h.
+
+**Implementado:**
+
+| Brecha cerrada | Archivo(s) | Descripción |
+|---|---|---|
+| Advisory lock (ADR-06) | `events.py` | `asyncio.Lock` per `conversation_id` — serializa procesamiento de una misma conversación en single-process |
+| Debouncing (ADR-06) | `events.py`, `config.py` | `asyncio.sleep(random.uniform(min, max))` con jitter configurable (demo: 3-7s, prod: 30-90s) |
+| Circuit breaker (ADR-01) | `circuit_breaker.py`, `gateway.py` | State machine closed→open→half-open por provider; bypass automático al siguiente provider disponible |
+| Evaluator pre-filter | `evaluator.py` | Reglas determinísticas antes del LLM: `draft_too_long` (>1500 chars), `forbidden_promise` (regex conjugado), `excessive_caps` (>40%). Ahorra tokens en casos obvios. |
+| State machine real | `orchestrator.py` | Orquestador actualiza `conversations.status` tras cada decisión: `engaging`, `closing` (meeting_intent), `handoff`, `escalated` |
+| Conversation status endpoint | `conversations.py`, `operator.py` | `get_by_status()` en repo + `GET /operator/conversations?status=X` + `status_breakdown` en dashboard |
+
+**Tests:** 52 pasando (3 nuevos: pre-filter forbidden_promise, excessive_length, clean_draft)
+**Ruff:** All checks passed
 
 ---
 

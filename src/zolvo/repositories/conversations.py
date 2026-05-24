@@ -36,5 +36,17 @@ class ConversationRepository(BaseRepository[Conversation]):
         )
         return [Conversation(**row) for row in res.data]
 
+    async def get_by_status(
+        self, tenant_id: uuid.UUID, status: str
+    ) -> list[Conversation]:
+        res = (
+            await self._table()
+            .select("*")
+            .eq("tenant_id", str(tenant_id))
+            .eq("status", status)
+            .execute()
+        )
+        return [Conversation(**row) for row in res.data]
+
     async def update_status(self, conversation_id: uuid.UUID, status: str) -> None:
         await self._table().update({"status": status}).eq("id", str(conversation_id)).execute()

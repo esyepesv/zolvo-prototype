@@ -93,4 +93,5 @@ async def get_orchestrator(
     classifier = IntentClassifier(gateway)
     conversationalist = ConversationalistAgent(gateway, memory, agent_run_repo)
     evaluator = EvaluatorAgent(gateway, agent_run_repo, threshold=settings.confidence_threshold)
-    return Orchestrator(classifier, conversationalist, evaluator, agent_run_repo)
+    conv_repo = ConversationRepository(supabase)
+    return Orchestrator(classifier, conversationalist, evaluator, agent_run_repo, conv_repo)
