@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 7 — COMPLETADO** |
-| Próximo hito | **Hito 8 — Evaluator / Confidence Gate** |
-| Último commit | `feat: Hito 7 — Conversationalist Agent con memoria dual y guía por intent` |
+| Hito actual | **Hito 8 — COMPLETADO** |
+| Próximo hito | **Hito 9 — Orchestrator** |
+| Último commit | `feat: Hito 8 — Evaluator / Confidence Gate con 3 ejes y umbral configurable` |
 
 ---
 
@@ -31,7 +31,7 @@
 | 5 | Intent Classifier (Puerta 1) | ✅ COMPLETADO | ✅ |
 | 6 | Memory Service (memoria dual) | ✅ COMPLETADO | ✅ |
 | 7 | Conversationalist Agent | ✅ COMPLETADO | ✅ |
-| 8 | Evaluator / Confidence Gate (Puerta 2) | ⏳ PENDIENTE | — |
+| 8 | Evaluator / Confidence Gate (Puerta 2) | ✅ COMPLETADO | ✅ |
 | 9 | Orchestrator | ⏳ PENDIENTE | — |
 | 10 | n8n workflow vía MCP | ⏳ PENDIENTE | — |
 | 11 | Dataset sintético + demo end-to-end | ⏳ PENDIENTE | — |
@@ -229,18 +229,35 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 8: Evaluator / Confidence Gate
+### ✅ Hito 8 — Evaluator / Confidence Gate
 
-**Prerequisito:** ✅ Conversationalist Agent funcional
+**DoD cumplido:** `ruff check .` → OK | `pytest -q` → 49 passed
+
+**Archivos creados:**
+- `src/zolvo/agents/evaluator.py` — `EvaluatorAgent.evaluate()`: score combinado (naturalidad + relevancia + (1-riesgo)) / 3, umbral configurable, registro de `agent_runs`
+- `src/zolvo/llm/prompts/evaluator.txt` — prompt español con 3 ejes de evaluación; `{{}}` escapados para `str.format()`
+- `tests/unit/test_evaluator.py` — 6 tests: draft bueno pasa, draft malo bloqueado, alto riesgo bloqueado, breakdown poblado, agent_run registrado, umbral configurable
+
+**Nota técnica:** braces literales `{}` en el ejemplo JSON del prompt deben estar escapados como `{{}}` para compatibilidad con `str.format()`.
+
+---
+
+## Próximo hito — Hito 9: Orchestrator
+
+**Prerequisito:** ✅ Evaluator funcional
 
 **Qué construir:**
 
-1. `src/zolvo/agents/evaluator.py` — `Evaluator.evaluate(draft, context)` → `EvaluationResult`
-   - Score en 3 ejes: naturalidad, relevancia, riesgo
-   - Umbral configurable vía `Settings.confidence_threshold`
-2. Tests con drafts buenos y malos usando `FakeLLMProvider`
+`src/zolvo/orchestrator/orchestrator.py` — `Orchestrator.handle_reply()`:
+1. Recibe evento `reply.received` (message + conversation_id + tenant_id)
+2. Carga memoria vía `MemoryService`
+3. Llama a `IntentClassifier`
+4. Si `should_handoff` → retorna `OrchestratorResult(action="handoff")` (sin generar)
+5. Si no → llama a `ConversationalistAgent`
+6. Llama a `EvaluatorAgent`
+7. Si `should_send` → retorna `OrchestratorResult(action="send", draft=...)` | si no → `action="escalate"`
 
-**DoD:** drafts obviamente malos son rechazados; drafts buenos pasan.
+**DoD:** happy path completo con datos sintéticos; test de integración con mocks.
 
 ---
 
