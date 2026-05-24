@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 10 — COMPLETADO** |
-| Próximo hito | **Hito 11 — Dataset sintético + demo end-to-end** |
-| Último commit | `feat: Hito 10 — n8n workflows creados vía API` |
+| Hito actual | **Hito 11 — COMPLETADO** |
+| Próximo hito | **Hito 12 — Polish para el video** |
+| Último commit | `feat: Hito 11 — demo end-to-end + fix embed + fix JSON parsing + fix pgvector search_path` |
 
 ---
 
@@ -34,7 +34,7 @@
 | 8 | Evaluator / Confidence Gate (Puerta 2) | ✅ COMPLETADO | ✅ |
 | 9 | Orchestrator | ✅ COMPLETADO | ✅ |
 | 10 | n8n workflow vía MCP | ✅ COMPLETADO | ✅ |
-| 11 | Dataset sintético + demo end-to-end | ⏳ PENDIENTE | — |
+| 11 | Dataset sintético + demo end-to-end | ✅ COMPLETADO | ✅ |
 | 12 | Polish para el video | ⏳ PENDIENTE | — |
 
 ---
@@ -275,20 +275,41 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 11: Dataset sintético + demo end-to-end
+### ✅ Hito 11 — Dataset sintético + demo end-to-end
 
-**Prerequisito:** ✅ Pipeline completo (API + n8n + Orchestrator)
+**DoD cumplido:** `python demo/run_happy_path.py` corre sin errores y muestra el pipeline completo.
+
+**Resultado del demo:**
+- Lead: Diego Ramírez, CTO @ CredIMex (fintech B2B mexicana)
+- Turn 1 (meeting_intent): SEND, score 0.900
+- Turn 2 (objection_price): SEND, score 0.867
+- Turn 3 (meeting_intent): SEND, score 0.900
+- Avg confidence: 0.889 — 3/3 sends, pipeline completo funcional
+
+**Archivos creados:**
+- `demo/run_happy_path.py` — script full end-to-end con `urllib.request` (sin deps externas)
+
+**Bugs corregidos durante demo:**
+- `openrouter_provider.py`: añadido `embed()` usando `https://openrouter.ai/api/v1/embeddings` (modelo `openai/text-embedding-3-small`)
+- `copywriter.py`: strip de markdown fences (` ```json...``` `) antes de `json.loads()` en response del LLM
+- `supabase/migrations/00000000000002_similarity_search.sql`: `set search_path = public` (era `''`) para que el operador `<=>` de pgvector resuelva correctamente en funciones SECURITY DEFINER
+
+---
+
+## Próximo hito — Hito 12: Polish para el video
+
+**Prerequisito:** ✅ Demo end-to-end funcional
 
 **Qué construir:**
 
-1. `supabase/seed_demo.sql` — 5 leads realistas de fintech B2B mexicana + 1 conversación con 3-4 mensajes
-2. `demo/run_happy_path.py` — script que:
-   - Crea lead vía `POST /agents/ingest`
-   - Simula 3 turnos de respuesta vía `POST /events/reply` (interested → objection_price → meeting_intent)
-   - Imprime en consola el estado al final (leads, agent_runs, cost, intent_distribution)
-3. Validar que las respuestas son coherentes
+1. Logs legibles para grabar en pantalla (ya hay structlog; ajustar niveles/formato si es necesario)
+2. Queries SQL preparadas para mostrar métricas al final del happy path:
+   - `cost_per_message` — costo promedio por mensaje enviado
+   - `confidence_score_avg` — promedio del score del evaluador
+   - `intent_distribution` — distribución de intents detectados
+3. README final: instrucciones reproducibles para clonar, instalar y correr en < 10 min
 
-**DoD:** `python demo/run_happy_path.py` corre sin errores y muestra el pipeline completo.
+**DoD:** el repo se ve profesional al primer scroll; se puede grabar el video.
 
 ---
 
