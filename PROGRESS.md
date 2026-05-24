@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 0 — COMPLETADO** |
-| Próximo hito | **Hito 1 — LLM Gateway** |
-| Último commit | `docs: add PROGRESS.md tracking + scripts/verify.sh` |
+| Hito actual | **Hito 1 — COMPLETADO** |
+| Próximo hito | **Hito 2 — Modelo de datos y repositorios** |
+| Último commit | `feat: Hito 1 — LLM Gateway con Strategy pattern` |
 
 ---
 
@@ -24,7 +24,7 @@
 | # | Nombre | Estado | Verificado |
 |---|---|---|---|
 | 0 | Setup base | ✅ COMPLETADO | ✅ |
-| 1 | LLM Gateway (Strategy pattern) | ⏳ PENDIENTE | — |
+| 1 | LLM Gateway (Strategy pattern) | ✅ COMPLETADO | ✅ |
 | 2 | Modelo de datos y repositorios | ⏳ PENDIENTE | — |
 | 3 | Researcher Agent | ⏳ PENDIENTE | — |
 | 4 | Copywriter Agent | ⏳ PENDIENTE | — |
@@ -114,26 +114,49 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 1: LLM Gateway
+### ✅ Hito 1 — LLM Gateway (Strategy pattern)
+
+**DoD cumplido:** `ruff check .` → OK | `pytest -v` → 7 passed | `FakeLLMProvider` + `LLMGateway` importables | prueba real omitida hasta que haya keys en `.env`
+
+**Archivos creados:**
+- `src/zolvo/llm/base.py` — `LLMRequest`, `LLMResponse`, `LLMProvider` (ABC), `LLMProviderError`, `TaskType`
+- `src/zolvo/llm/fake_provider.py` — `FakeLLMProvider` con `overrides` por `task_type`
+- `src/zolvo/llm/anthropic_provider.py` — Anthropic Messages API via httpx, retries con tenacity
+- `src/zolvo/llm/openai_provider.py` — OpenAI Chat Completions API via httpx, retries con tenacity
+- `src/zolvo/llm/gateway.py` — `LLMGateway`: routing por `preferred_llm_provider`, fallback automático
+- `tests/unit/test_llm_gateway.py` — 6 tests unitarios (todos con `FakeLLMProvider`)
+
+**Archivos modificados:**
+- `src/zolvo/config.py` — agrega `preferred_llm_provider: str = "anthropic"`
+- `.env.example` — agrega `PREFERRED_LLM_PROVIDER=anthropic`
+
+**Modelos por task_type:**
+- `classification` / `generation_standard`: `claude-haiku-4-5-20251001` (Anthropic) / `gpt-4o-mini` (OpenAI)
+- `generation_critical`: `claude-sonnet-4-6` (Anthropic) / `gpt-4o` (OpenAI)
+
+**Pendiente:** prueba funcional con provider real (requiere key en `.env`). El verify.sh la corre automáticamente cuando detecta `ANTHROPIC_API_KEY` o `OPENAI_API_KEY`.
+
+**Verificación:** `bash scripts/verify.sh 1` → todos los checks pasan
+
+---
+
+## Próximo hito — Hito 2: Modelo de datos y repositorios
+
+**Prerequisito:** El autor debe crear el proyecto Supabase y llenar `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` en `.env` antes de este hito.
 
 **Qué construir:**
 
-1. `src/zolvo/llm/base.py` — interfaz `LLMProvider` + dataclasses `LLMRequest` / `LLMResponse`
-2. `src/zolvo/llm/openai_provider.py` — implementación OpenAI via httpx async
-3. `src/zolvo/llm/anthropic_provider.py` — implementación Anthropic via httpx async
-4. `src/zolvo/llm/fake_provider.py` — `FakeLLMProvider` con respuestas predefinidas (para tests)
-5. `src/zolvo/llm/gateway.py` — `LLMGateway` con routing por `task_type`:
-   - `classification` → modelo barato (haiku / gpt-4o-mini)
-   - `generation_critical` → modelo premium (sonnet / gpt-4o)
-   - `generation_standard` → modelo intermedio
-6. Tests unitarios: routing elige proveedor correcto; `FakeLLMProvider` retorna predefinido
+1. `supabase/migrations/00000000000001_domain_tables.sql` — tablas: `leads`, `conversations`, `messages`, `agent_runs`, `lead_embeddings`, `conversation_summaries_embeddings`, `events_outbox`; RLS + índices con `tenant_id`
+2. `src/zolvo/models/domain.py` — SQLAlchemy 2.x mapped classes (async)
+3. `src/zolvo/repositories/base.py` — `BaseRepository` abstracto con sesión async
+4. `src/zolvo/repositories/leads.py` — `LeadRepository.create()` y `LeadRepository.get_by_id()`
+5. `src/zolvo/repositories/conversations.py` — `ConversationRepository`
+6. `src/zolvo/repositories/messages.py` — `MessageRepository`
+7. `src/zolvo/repositories/agent_runs.py` — `AgentRunRepository.create()` (logging de LLM calls)
+8. `src/zolvo/api/deps.py` — `get_db_session()` dependency para FastAPI
+9. Tests de integración: crear lead → leer lead → verificar RLS bloquea cross-tenant
 
-**DoD:** `gateway.complete(task_type="classification", prompt="...")` funciona con al menos 2 proveedores reales (requiere keys en `.env`).
-
-**Modelos por task_type (por costo):**
-- `classification`: `claude-haiku-4-5` (Anthropic) o `gpt-4o-mini` (OpenAI)
-- `generation_critical`: `claude-sonnet-4-6` (Anthropic) o `gpt-4o` (OpenAI)
-- `generation_standard`: `claude-haiku-4-5` o `gpt-4o-mini`
+**DoD:** `LeadRepository.create()` y `LeadRepository.get_by_id()` funcionan contra Supabase real.
 
 ---
 

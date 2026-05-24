@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     debounce_min_seconds: int = Field(default=30, ge=0)
     debounce_max_seconds: int = Field(default=90, ge=0)
 
+    # LLM routing
+    preferred_llm_provider: str = Field(default="anthropic")
+
     # App
     env: Literal["dev", "test", "prod"] = Field(default="dev")
     log_level: str = Field(default="INFO")
