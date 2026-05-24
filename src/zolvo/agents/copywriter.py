@@ -83,8 +83,11 @@ class CopywriterAgent(AgentBase):
             temperature=0.7,
         )
 
+        raw = response.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         try:
-            draft: dict = json.loads(response.content)
+            draft: dict = json.loads(raw)
             subject = draft.get("subject", "")
             body = draft.get("body", response.content)
             channel = draft.get("channel", "email")
