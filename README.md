@@ -2,7 +2,7 @@
 
 > Propuesta técnica · Coding Fellowship · Makers Admission 2026-2
 
-Pipeline de ventas outbound multi-agente: enrichment de leads, generación de mensajes personalizados, clasificación de intent, memoria dual (textual + vectorial), y gate de confianza antes de enviar cada respuesta.
+Pipeline de ventas outbound multi-agente: enrichment de leads, generación de mensajes personalizados, clasificación de intent, memoria dual (textual + vectorial), gate de confianza antes de enviar cada respuesta, y dashboard del operador con métricas en tiempo real.
 
 ## Prerequisitos
 
@@ -44,7 +44,7 @@ PYTHONPATH=src .venv/bin/pytest -q
 # → 54 passed
 
 # 6. Levantar la API
-PYTHONPATH=src .venv/bin/uvicorn zolvo.api.main:app --reload
+PYTHONPATH=src .venv/bin/uvicorn zolvo.api.main:app --host 0.0.0.0 --reload
 # → http://localhost:8000/health  {"status":"ok"}
 # → http://localhost:8000/docs    Swagger UI
 ```
@@ -57,70 +57,112 @@ Con la API corriendo en otra terminal:
 PYTHONPATH=src .venv/bin/python demo/run_happy_path.py
 ```
 
-Flujo completo en ~45s, con output visual usando `rich`:
+Flujo completo en ~60s con output visual usando `rich`:
 
 ```
 ╭─────────────────────────────────────────────────────────╮
 │    ZOLVO AI SALES ENGINE                                │
 │    Demo End-to-End · Happy Path · Fintech B2B México    │
 ╰─────────────────────────────────────────────────────────╯
+  Terminal 1 shows live API logs: researcher, intent, evaluator,
+  channel.linkedin.send, slack alerts
 
 ──────────────────── STEP 1 — Ingest Lead ────────────────────
 
-  Lead : Diego Ramírez — CTO @ CredIMex
+  Lead : Diego Ramírez — CTO @ CredIMex  (diego.ramirez@credimex.com.mx)
+  ✓ lead_id          0f694bfc-...
+  ✓ conversation_id  e6a562bb-...
+  ✓ elapsed          12.2s
 
-  ✓ lead_id          b2000fc9-62f3-...
-  ✓ conversation_id  babcedc9-fc82-...
-  ✓ elapsed          13.7s
+╭──────────────── Outbound Message ─────────────────────╮
+│ Subject: Diego, ¿cómo escalas tu outreach...          │
+│                                                       │
+│ Hola Diego, vi que eres CTO en CredIMex...            │
+╰───────────────────────────────────────────────────────╯
 
-╭──────────────── Outbound Message ──────────────────╮
-│ Subject: Diego, ¿cómo escalan el outreach...       │
-│                                                    │
-│ Hola Diego, vi que eres CTO en CredIMex...         │
-╰────────────────────────────────────────────────────╯
+──────────── STEP 2 — Turn 1 — Interés inicial ─────────────
 
-──────────── STEP 2 — Turn 1 — Interés inicial ───────────────
-
-╭─── PROSPECT ───╮
-│ Hola, me llegó tu mensaje. Estamos evaluando...   │
-╰────────────────╯
+╭─── PROSPECT ────────────────────────────────────────────╮
+│  Hola, me llegó tu mensaje. Estamos evaluando...        │
+╰─────────────────────────────────────────────────────────╯
   Intent  meeting_intent
-  Action  ✓ SEND   score 0.900   [9.1s]
+  Action  ✓ SEND   score 0.867   [9.9s]
 
-╭─── Agent Reply ───╮
-│ Perfecto, me da gusto que te interese...          │
-╰───────────────────╯
+╭─── Agent Reply — enviado vía LinkedIn ──────────────────╮
+│  Perfecto, me da gusto que te interese...               │
+╰─────────────────────────────────────────────────────────╯
 
-──────────── STEP 3 — Turn 2 — Objeción de precio ────────────
+──────────── STEP 3 — Turn 2 — Objeción de precio ──────────
 
   Intent  objection_price
-  Action  ✓ SEND   score 0.867   [9.4s]
+  Action  ✓ SEND   score 0.750   [9.8s]
 
-──────────── STEP 4 — Turn 3 — Intent de meeting ─────────────
+──────────── STEP 4 — Turn 3 — Intent de meeting ───────────
 
   Intent  meeting_intent
-  Action  ↑ ESCALATE   score 0.500   [9.5s]   ← Gate 2 bloqueó
+  Action  ✓ SEND   score 0.867   [11.1s]
 
-──────────────────── PIPELINE SUMMARY ───────────────────────
+────────────── PIPELINE SUMMARY ────────────────────────────
 
-╭────────┬──────────────────────┬──────────────┬─────────┬────────┬────────╮
-│  Turn  │ Intent               │   Action     │  Score  │ Gate 1 │ Gate 2 │
-├────────┼──────────────────────┼──────────────┼─────────┼────────┼────────┤
-│   1    │ meeting_intent       │   ✓ SEND     │  0.900  │  PASS  │  PASS  │
-│   2    │ objection_price      │   ✓ SEND     │  0.867  │  PASS  │  PASS  │
-│   3    │ meeting_intent       │  ↑ ESCALATE  │  0.500  │  PASS  │  BLOCK │
-╰────────┴──────────────────────┴──────────────┴─────────┴────────┴────────╯
+╭──────┬──────────────────────┬──────────┬───────┬────────┬────────╮
+│ Turn │ Intent               │  Action  │ Score │ Gate 1 │ Gate 2 │
+├──────┼──────────────────────┼──────────┼───────┼────────┼────────┤
+│  1   │ meeting_intent       │ ✓ SEND   │ 0.867 │  PASS  │  PASS  │
+│  2   │ objection_price      │ ✓ SEND   │ 0.750 │  PASS  │  PASS  │
+│  3   │ meeting_intent       │ ✓ SEND   │ 0.867 │  PASS  │  PASS  │
+╰──────┴──────────────────────┴──────────┴───────┴────────┴────────╯
 
   Intent path       meeting_intent → objection_price → meeting_intent
-  Avg conf score    0.756
-  Sends / Escalations / Handoffs   2 / 1 / 0
+  Avg conf score    0.828
+  Sends / Escalations / Handoffs   3 / 0 / 0
+
+──────── VISTA DEL PROSPECTO — LinkedIn Inbox ───────────────
+
+  Lo que Diego Ramírez ve en su bandeja de LinkedIn
+
+╭─── Sales Rep @ Zolvo  ← recibido ──────────────────────╮
+│  Subject: Diego, ¿cómo escalas tu outreach...          │
+╰────────────────────────────────────────────────────────╯
+╭─── Diego Ramírez  → enviado ───────────────────────────╮
+│  Hola, me llegó tu mensaje...                          │
+╰────────────────────────────────────────────────────────╯
+╭─── Sales Rep @ Zolvo  ← recibido ──────────────────────╮
+│  Perfecto, me da gusto...                              │
+╰────────────────────────────────────────────────────────╯
+... (todos los turnos del hilo) ...
+
+──────────── DASHBOARD DEL OPERADOR ─────────────────────────
+
+   Leads en pipeline           154
+   Conversaciones               91
+   Mensajes recibidos           17
+   Mensajes enviados            42
+   Escalaciones pendientes       1
+   Costo total USD         $0.0799
+
+  Costo por agente:
+╭───────────────────┬───────────╮
+│ Agente            │       USD │
+├───────────────────┼───────────┤
+│ conversationalist │ $0.027439 │
+│ evaluator         │ $0.020127 │
+│ copywriter        │ $0.016657 │
+│ researcher        │ $0.015700 │
+│ intent_classifier │ $0.000000 │
+╰───────────────────┴───────────╯
+
+  Distribución de intents:
+╭─────────────────┬───────╮
+│ Intent          │ Count │
+├─────────────────┼───────┤
+│ meeting_intent  │     2 │
+│ objection_price │     1 │
+╰─────────────────┴───────╯
 
 ╭────────────────────────────────────────────────────╮
 │  ingest → classify → generate → evaluate → route ✓ │
 ╰────────────────────────────────────────────────────╯
 ```
-
-El Turn 3 muestra `↑ ESCALATE` porque el Evaluator (Gate 2) calculó score 0.500 < umbral 0.70 — el borrador no superó el gate de calidad y queda para revisión humana. Esto demuestra que el sistema no envía todo automáticamente.
 
 ### Métricas post-demo
 
@@ -142,9 +184,21 @@ El sistema es un **pipeline de ventas outbound completamente automatizado**. Tom
 |---|---|---|
 | **Researcher** | Analiza al lead y genera un perfil de ICP: fit, pain points, hooks de conversación, tamaño de empresa. Guarda un embedding semántico para RAG. | `claude-haiku-4.5` (barato) |
 | **Copywriter** | Genera el primer mensaje outbound: subject + body personalizados con los hooks del Researcher. Devuelve JSON `{subject, body, channel}`. | `claude-haiku-4.5` |
-| **IntentClassifier** | Clasifica cada respuesta del prospecto en una de 9 categorías. Decide si el agente puede responder o si se necesita un humano. | `claude-haiku-4.5` (temperatura 0.1) |
+| **IntentClassifier** | Clasifica cada respuesta del prospecto en una de 9 categorías. Decide si el agente puede responder o si se necesita un humano. Persiste en `agent_runs`. | `claude-haiku-4.5` (temperatura 0.1) |
 | **Conversationalist** | Genera la respuesta multi-turn. Usa memoria dual: los últimos 15 mensajes del hilo + búsqueda semántica en embeddings históricos. Adapta el tono según el intent detectado. | `claude-haiku-4.5` |
 | **Evaluator** | Evalúa el borrador antes de enviarlo en 3 ejes: naturalidad (¿suena humano?), relevancia (¿responde al intent?), riesgo (¿podría dañar la relación?). Bloquea el envío si el score es bajo. | `claude-haiku-4.5` (temperatura 0) |
+
+### Los adaptadores de canal
+
+Los canales están implementados como stubs que loguean via structlog — visibles en los logs de la API (Terminal 1 durante la demo):
+
+| Adaptador | Qué hace | Log visible en Terminal 1 |
+|---|---|---|
+| `LinkedInMockAdapter` | Simula envío de DM en LinkedIn | `channel.linkedin.send` |
+| `EmailMockAdapter` | Simula envío de email | `channel.email.send` |
+| `SlackStub` | Notifica handoffs y escalaciones al operador | `slack.handoff_alert` / `slack.escalation_alert` |
+
+En producción, cada mock se reemplaza con un adaptador real (API de LinkedIn, SMTP, Slack Webhooks) sin cambiar la lógica de negocio.
 
 ### Las 9 categorías de intent
 
@@ -174,7 +228,7 @@ Respuesta del prospecto
   └─────────────────┘
         │
         ├── should_handoff=True ──────────────────→ HANDOFF
-        │                                           (acción: "handoff")
+        │                                           Slack: slack.handoff_alert
         │
         └── should_handoff=False
                 │
@@ -189,32 +243,59 @@ Respuesta del prospecto
         │  Quality Gate   │  score = (naturalidad + relevancia + (1−riesgo)) / 3
         └─────────────────┘
                 │
-                ├── score ≥ 0.70 ──→ SEND      (mensaje persistido + enviado)
-                └── score < 0.70 ──→ ESCALATE  (borrador guardado para revisión)
+                ├── score ≥ 0.70 ──→ SEND      (LinkedIn mock: channel.linkedin.send)
+                └── score < 0.70 ──→ ESCALATE  (Slack: slack.escalation_alert)
 ```
 
 ### La memoria dual
 
 El Conversationalist tiene dos capas de memoria:
 
-- **Short-term (textual):** los últimos 15 mensajes del hilo actual. Se pasan directamente al prompt como contexto de conversación. Costo: cero (ya están en DB).
+- **Short-term (textual):** los últimos 15 mensajes del hilo actual. Se pasan directamente al prompt como contexto de conversación.
 - **Long-term (semántica):** búsqueda vectorial en pgvector. Al generar la respuesta, se embeddea el mensaje del prospecto y se buscan:
   - **`lead_embeddings`** — perfil semántico del lead generado por el Researcher.
-  - **`conversation_summaries_embeddings`** — resúmenes de conversaciones anteriores con este u otros leads del tenant.
-  
-  Esto permite que el agente "recuerde" contexto de interacciones previas aunque no estén en el hilo actual.
+  - **`conversation_summaries_embeddings`** — resúmenes de conversaciones anteriores.
 
 ### Observabilidad: la tabla `agent_runs`
 
-Cada vez que un agente corre, registra una fila en `agent_runs` con:
-- `agent_name` — qué agente fue
+Cada agente registra una fila en `agent_runs` con:
+- `agent_name` — qué agente fue (`researcher`, `copywriter`, `conversationalist`, `evaluator`, `intent_classifier`)
 - `tokens_in / tokens_out` — consumo exacto de tokens
 - `cost_usd` — costo calculado por el provider
 - `latency_ms` — tiempo de respuesta del LLM
-- `input_payload / output_payload` — qué recibió y qué devolvió
-- `llm_provider / llm_model` — qué modelo se usó en esta llamada
+- `output_payload` — qué devolvió (intent, score, draft, etc.)
 
-Esto permite auditar el costo por conversación, detectar agentes lentos, y comparar modelos.
+### El dashboard del operador
+
+El endpoint `GET /operator/dashboard?tenant_id=...` agrega métricas en tiempo real:
+
+```json
+{
+  "pipeline": {
+    "total_leads": 154,
+    "total_conversations": 91,
+    "messages_inbound": 17,
+    "messages_outbound": 42
+  },
+  "quality_gates": {
+    "pending_escalations": 1
+  },
+  "cost": {
+    "total_usd": 0.079923,
+    "by_agent": {
+      "conversationalist": 0.027439,
+      "evaluator": 0.020127,
+      "copywriter": 0.016657,
+      "researcher": 0.015700,
+      "intent_classifier": 0.0
+    }
+  },
+  "intent_distribution": {
+    "meeting_intent": 2,
+    "objection_price": 1
+  }
+}
+```
 
 ---
 
@@ -224,7 +305,7 @@ Esto permite auditar el costo por conversación, detectar agentes lentos, y comp
 
 ```bash
 # Terminal 1 — la API debe estar corriendo
-PYTHONPATH=src .venv/bin/uvicorn zolvo.api.main:app --reload
+PYTHONPATH=src .venv/bin/uvicorn zolvo.api.main:app --host 0.0.0.0 --reload
 
 # Verificar que responde
 curl http://localhost:8000/health
@@ -243,46 +324,29 @@ PYTHONPATH=src .venv/bin/python demo/run_happy_path.py
 
 El script ejecuta este escenario automáticamente:
 
-| Paso | Qué pasa | Qué se ve en consola |
-|---|---|---|
-| Ingest | Lead Diego Ramírez (CTO @ CredIMex) es creado, enriquecido por el Researcher, y el Copywriter genera el primer mensaje outbound | Subject + body del mensaje inicial |
-| Turn 1 | Prospecto responde con interés y pide una llamada | Intent: `meeting_intent` → Action: `✓ SEND` + borrador de respuesta |
-| Turn 2 | Prospecto objeta el precio ("somos una startup de 30 personas") | Intent: `objection_price` → Action: `✓ SEND` + respuesta que maneja la objeción |
-| Turn 3 | Prospecto confirma meeting ("¿pueden el jueves o viernes?") | Intent: `meeting_intent` → Gate 2 puede bloquear si el score < 0.70 → `↑ ESCALATE` o `✓ SEND` |
-| Summary | Resumen del pipeline | Intent path, action path, confidence scores |
+| Paso | Qué pasa | Qué se ve en Terminal 2 | Qué se ve en Terminal 1 (API logs) |
+|---|---|---|---|
+| Ingest | Lead Diego Ramírez (CTO @ CredIMex) es creado, enriquecido, y el Copywriter genera el mensaje outbound | Subject + body del mensaje inicial | `researcher.completed`, `copywriter.completed` |
+| Turn 1 | Prospecto responde con interés y pide una llamada | Intent: `meeting_intent` → Action: `✓ SEND` + borrador | `intent_classifier.classified`, `channel.linkedin.send` |
+| Turn 2 | Prospecto objeta el precio | Intent: `objection_price` → Action: `✓ SEND` + manejo de objeción | `evaluator.completed`, `channel.linkedin.send` |
+| Turn 3 | Prospecto confirma meeting con CEO | Intent: `meeting_intent` → `✓ SEND` (o `↑ ESCALATE` si Gate 2 bloquea) | `orchestrator.evaluated`, `channel.linkedin.send` |
+| Prospect view | Simulación de inbox LinkedIn mostrando el hilo completo | Panels blancos (agente) + azules (prospecto) | — |
+| Dashboard | Métricas del operador en tiempo real | Tabla de costos por agente + distribución de intents | — |
+| Summary | Resumen del pipeline | Intent path, action path, confidence scores | — |
+
+> **Nota sobre Gate 2:** En el happy path, los 3 turnos pasan con scores ≥ 0.70.
+> Si el evaluador decide `↑ ESCALATE` en algún turno, se verá `slack.escalation_alert`
+> en Terminal 1 y el borrador quedará marcado como "pendiente revisión" en la vista del prospecto.
 
 ### Paso 2 — Mostrar métricas en Supabase
 
-Después de correr el demo, abrir el **SQL Editor** en supabase.com y pegar el contenido de `demo/metrics.sql`. Ejecutar cada query por separado para mostrar:
-
-**Query 1 — Costo por agente:**
-```sql
--- muestra: researcher, copywriter, conversationalist, evaluator, intent_classifier
--- columnas: runs, tokens_in, tokens_out, total_cost_usd, avg_latency_ms
-```
-
-**Query 2 — Confidence scores del Evaluator:**
-```sql
--- muestra: score numérico + should_send por cada evaluación
--- permite ver que todos los drafts pasaron el gate (score > 0.70)
-```
-
-**Query 3 — Distribución de intents:**
-```sql
--- muestra: meeting_intent x2, objection_price x1
--- evidencia que el clasificador funcionó correctamente
-```
-
-**Query 4 — Totales del pipeline:**
-```sql
--- muestra: 1 lead, 1 conversación, 3 mensajes inbound, 3 outbound, costo total USD
-```
+Después de correr el demo, abrir el **SQL Editor** en supabase.com y pegar el contenido de `demo/metrics.sql`.
 
 ### Paso 3 — Mostrar la API en Swagger (opcional)
 
-Abrir `http://localhost:8000/docs` y ejecutar manualmente un `POST /agents/ingest` con un lead diferente para mostrar el sistema en tiempo real.
+Abrir `http://localhost:8000/docs` y ejecutar manualmente un `POST /agents/ingest` con un lead diferente.
 
-Payload de ejemplo para Swagger:
+Payload de ejemplo:
 ```json
 {
   "tenant_id": "00000000-0000-0000-0000-000000000001",
@@ -297,20 +361,36 @@ Payload de ejemplo para Swagger:
 
 ### Qué mostrar en los logs (Terminal 1)
 
-Mientras corre el demo, la API imprime logs estructurados en tiempo real. Los más relevantes para la demo:
-
 ```
 researcher.completed    lead_id=... icp_fit=alto embedding_saved=True cost_usd=0.000312
 copywriter.completed    lead_id=... channel=email subject="..." cost_usd=0.000089
-intent_classifier.classified  intent=meeting_intent should_handoff=False confidence=0.95
-conversationalist.completed   conversation_id=... cost_usd=0.000421 latency_ms=3241
-evaluator.completed     score=0.9 should_send=True latency_ms=1823
-orchestrator.evaluated  score=0.9 should_send=True
+intent_classifier.classified  intent=meeting_intent should_handoff=False
+channel.linkedin.send   to=<conv_id> chars=420
+evaluator.completed     score=0.867 should_send=True latency_ms=1823
+orchestrator.evaluated  score=0.867 should_send=True
+
+# Si action=handoff:
+slack.handoff_alert     conversation_id=... intent=opt_out  action_required="Assign to SDR"
+
+# Si action=escalate:
+slack.escalation_alert  conversation_id=... confidence_score=0.45  action_required="Review and approve/edit draft"
 ```
 
-Estos logs evidencian que cada componente del pipeline corre de forma independiente, con su propio modelo y su propio registro de costos.
+---
+
+## Endpoints de la API
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/health` | Estado de la API |
+| `POST` | `/agents/ingest` | Crea lead → Researcher → Copywriter → mensaje outbound |
+| `POST` | `/events/reply` | Recibe respuesta del prospecto → pipeline de dos puertas → route |
+| `GET` | `/operator/dashboard` | Métricas del pipeline en tiempo real (param: `tenant_id`) |
+| `GET` | `/docs` | Swagger UI |
 
 ---
+
+## Stack tecnológico
 
 | Capa | Tecnología |
 |---|---|
@@ -318,8 +398,9 @@ Estos logs evidencian que cada componente del pipeline corre de forma independie
 | Base de datos | Supabase · Postgres + pgvector + RLS multi-tenant |
 | Acceso a datos | supabase-py async (REST API via HTTPS) |
 | LLM Gateway | Strategy pattern: OpenRouter (default) · Anthropic · OpenAI · Ollama |
+| Canales | LinkedInMockAdapter · EmailMockAdapter · SlackStub (logs en Terminal 1) |
 | Orquestación | n8n self-hosted |
-| Observabilidad | structlog · `agent_runs` table (costo, latencia, tokens por agente) |
+| Observabilidad | structlog · tabla `agent_runs` (costo, latencia, tokens por agente) |
 
 ## Arquitectura del pipeline
 
@@ -331,27 +412,27 @@ Lead ingested
       │
       ▼
  Copywriter ──→ outbound message (subject + body)
-      │
+      │         └─→ LinkedInMockAdapter.send_message()
       ▼
  [Reply received]
       │
       ▼
- IntentClassifier (Gate 1)
+ IntentClassifier (Gate 1) ──→ persiste en agent_runs
       │
-      ├─ should_handoff=True ──→ HANDOFF (human review)
+      ├─ should_handoff=True ──→ HANDOFF → SlackStub.notify_handoff()
       │
       └─ should_handoff=False
             │
             ▼
        Conversationalist (memoria dual)
-            │  ├─ short-term: últimos N mensajes
+            │  ├─ short-term: últimos 15 msgs
             │  └─ long-term: pgvector similarity search
             ▼
        EvaluatorAgent (Gate 2)
             │  score = (naturalidad + relevancia + (1−riesgo)) / 3
             │
-            ├─ score ≥ 0.70 ──→ SEND
-            └─ score < 0.70 ──→ ESCALATE
+            ├─ score ≥ 0.70 ──→ SEND → LinkedInMockAdapter.send_message()
+            └─ score < 0.70 ──→ ESCALATE → SlackStub.notify_escalation()
 ```
 
 ## Estructura del proyecto
@@ -359,25 +440,39 @@ Lead ingested
 ```
 zolvo-prototype/
 ├── src/zolvo/
-│   ├── api/            # FastAPI: /health, /agents/ingest, /events/reply
-│   ├── agents/         # Researcher, Copywriter, Conversationalist, Evaluator
-│   ├── intent/         # IntentClassifier — 9 categorías
-│   ├── orchestrator/   # Pipeline coordinator (dos puertas)
-│   ├── memory/         # MemoryService — short-term + long-term (pgvector)
-│   ├── llm/            # LLM Gateway + providers + prompts versionados
-│   ├── repositories/   # Repository pattern — supabase-py async
-│   ├── models/         # Pydantic domain models
-│   └── config.py       # Settings via pydantic-settings
+│   ├── api/
+│   │   ├── main.py             # FastAPI app + lifespan
+│   │   ├── deps.py             # FastAPI dependency injection
+│   │   └── routes/
+│   │       ├── agents.py       # POST /agents/ingest
+│   │       ├── events.py       # POST /events/reply
+│   │       └── operator.py     # GET /operator/dashboard
+│   ├── agents/                 # Researcher, Copywriter, Conversationalist, Evaluator
+│   ├── channels/               # Adaptadores de canal
+│   │   ├── base.py             # ChannelAdapter ABC + SendResult
+│   │   ├── linkedin_mock.py    # LinkedInMockAdapter (log: channel.linkedin.send)
+│   │   ├── email_mock.py       # EmailMockAdapter (log: channel.email.send)
+│   │   └── slack_stub.py       # SlackStub (log: slack.handoff_alert / escalation_alert)
+│   ├── intent/                 # IntentClassifier — 9 categorías
+│   ├── orchestrator/           # Pipeline coordinator (dos puertas)
+│   ├── memory/                 # MemoryService — short-term + long-term (pgvector)
+│   ├── llm/                    # LLM Gateway + providers + prompts versionados
+│   ├── repositories/           # Repository pattern — supabase-py async
+│   ├── models/                 # Pydantic domain models
+│   ├── schemas.py              # Request/Response schemas FastAPI
+│   └── config.py               # Settings via pydantic-settings
 ├── demo/
-│   ├── run_happy_path.py   # Script demo end-to-end
-│   └── metrics.sql         # Queries de métricas para Supabase SQL Editor
+│   ├── run_happy_path.py       # Script demo end-to-end (rich terminal UI)
+│   └── metrics.sql             # Queries de métricas para Supabase SQL Editor
 ├── supabase/
-│   ├── migrations/         # SQL versionado (3 archivos)
-│   └── seed.sql            # Tenant demo
-├── n8n/workflows/          # Exports JSON de workflows n8n
+│   ├── migrations/             # SQL versionado (3 archivos)
+│   └── seed.sql                # Tenant demo
+├── n8n/
+│   ├── workflows/              # Exports JSON de workflows n8n
+│   └── README.md               # Qué hace n8n, curl commands, escenario Konfío
 ├── tests/
-│   ├── unit/               # 49 tests con FakeLLMProvider (sin red)
-│   └── integration/        # 5 tests contra Supabase real
+│   ├── unit/                   # 49 tests con FakeLLMProvider (sin red)
+│   └── integration/            # 5 tests contra Supabase real
 └── docs/
     └── arquitectura-zolvo.md   # C4, ADRs, modelo de datos, máquina de estados
 ```
@@ -398,7 +493,7 @@ zolvo-prototype/
 | 9 | Orchestrator (pipeline coordinado dos puertas) | ✅ |
 | 10 | FastAPI endpoints + n8n workflows via API | ✅ |
 | 11 | Demo end-to-end — happy path funcional | ✅ |
-| 12 | Polish para el video | ✅ |
+| 12 | Polish para el video (channel stubs, operator dashboard, prospect view) | ✅ |
 
 Ver [PROGRESS.md](PROGRESS.md) para el estado detallado y decisiones técnicas.
 

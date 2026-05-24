@@ -1,19 +1,16 @@
 {
   "id": "5VEfQA0VC44iM6Zs",
-  "name": "Zolvo \u2014 New Lead Ingestion",
+  "name": "Zolvo — New Lead Ingestion",
   "nodes": [
     {
       "id": "n1",
-      "name": "Webhook \u2014 New Lead",
+      "name": "Webhook — New Lead",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        240,
-        300
-      ],
+      "position": [240, 300],
       "parameters": {
         "path": "zolvo-new-lead",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "httpMethod": "POST"
       },
       "webhookId": "zolvo-new-lead"
@@ -23,10 +20,7 @@
       "name": "POST /agents/ingest",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [
-        480,
-        300
-      ],
+      "position": [500, 300],
       "parameters": {
         "method": "POST",
         "url": "http://localhost:8000/agents/ingest",
@@ -41,37 +35,100 @@
       "name": "Respond to Webhook",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [
-        720,
-        300
-      ],
+      "position": [760, 300],
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json }}"
       }
+    },
+    {
+      "id": "n4",
+      "name": "IF — ¿Mensaje generado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [500, 540],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.subject }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "n5",
+      "name": "LinkedIn — Enviar DM al Prospecto",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [760, 460],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"subject\": $json.subject, \"body\": $json.body } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n6",
+      "name": "Slack — Notificar SDR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [760, 620],
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/PLACEHOLDER/PLACEHOLDER/PLACEHOLDER",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"text\": \"📥 Nuevo lead: \" + $json.body.full_name + \" — \" + $json.body.role + \" @ \" + $json.body.company + \". Outreach iniciado.\" } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "n7",
+      "name": "Wait — 2-3 días (re-engagement)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1020, 540],
+      "parameters": {
+        "resume": "timeInterval",
+        "unit": "days",
+        "amount": 2
+      }
+    },
+    {
+      "id": "n8",
+      "name": "Supabase — Actualizar estado a engaging",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1280, 540],
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://placeholder.supabase.co/rest/v1/leads",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"status\": \"engaging\" }",
+        "options": {}
+      }
     }
   ],
   "connections": {
-    "Webhook \u2014 New Lead": {
+    "Webhook — New Lead": {
       "main": [
-        [
-          {
-            "node": "POST /agents/ingest",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "POST /agents/ingest", "type": "main", "index": 0 }]
       ]
     },
     "POST /agents/ingest": {
       "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
       ]
     }
   },

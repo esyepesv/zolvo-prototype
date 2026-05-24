@@ -3,8 +3,8 @@
 **Propuesta técnica · Coding Fellowship · Makers Admission 2026-2**
 
 **Autor:** Stiven Yepes Vanegas
-**Versión:** 0.2 (revisión arquitectónica aplicada — pendiente prototipo)
-**Última actualización:** 23 de mayo de 2026
+**Versión:** 0.3 (prototipo completado — todos los hitos 0-12 implementados)
+**Última actualización:** 24 de mayo de 2026
 
 ---
 
@@ -802,45 +802,48 @@ Esta fórmula es defendible porque cada variable se mide desde la base de datos,
 
 ---
 
-## 12. Pendientes y siguientes pasos
+## 12. Estado de implementación del prototipo
 
-### Lo que falta antes del prototipo
+### Implementado (Hitos 0-12 completados)
 
-- [x] Estructura del proyecto Python (monorepo con paquetes) — Hito 0
-- [x] Contratos de interfaz para `LLMProvider` y `Repository` — Hitos 1 y 2
-- [x] Configuración de Supabase: migrations, RLS policies, seed data — Hito 2
-- [ ] Contratos de interfaz para `ChannelAdapter` y `Agent` — Hito 3+
-- [ ] Definición de prompts base (Researcher, Copywriter, Conversationalist, Evaluator)
-- [ ] Workflow de n8n para el happy path — Hito 10
-- [ ] Dataset sintético de leads ICP México (fintech B2B) — Hito 11
+- ✅ **[Hito 0]** Estructura del proyecto Python, CI (ruff + pytest), Supabase schema + RLS
+- ✅ **[Hito 1]** LLM Gateway con Strategy pattern — 4 proveedores (OpenRouter, Anthropic, OpenAI, FakeLLMProvider)
+- ✅ **[Hito 2]** Modelo de datos y repositorios con RLS multi-tenant (supabase-py async)
+- ✅ **[Hito 3]** Researcher Agent — enrichment ICP + embedding pgvector
+- ✅ **[Hito 4]** Copywriter Agent — mensaje outbound personalizado (subject + body JSON)
+- ✅ **[Hito 5]** Intent Classifier — 9 categorías, handoff automático, persiste en `agent_runs`
+- ✅ **[Hito 6]** Memory Service — short-term textual (últimos 15 msgs) + long-term pgvector
+- ✅ **[Hito 7]** Conversationalist Agent — multi-turn con memoria dual, adapta tono por intent
+- ✅ **[Hito 8]** Evaluator / Confidence Gate — score = (naturalidad + relevancia + (1−riesgo)) / 3
+- ✅ **[Hito 9]** Orchestrator — pipeline coordinado dos puertas, persiste agent_run de intent_classifier
+- ✅ **[Hito 10]** FastAPI endpoints completos + 2 workflows n8n activos
+- ✅ **[Hito 11]** Demo end-to-end funcional — lead Diego Ramírez (CTO @ CredIMex), 3 turnos
+- ✅ **[Hito 12]** Polish para el video:
+  - `ChannelAdapter` ABC + `LinkedInMockAdapter` + `EmailMockAdapter` (logs via structlog)
+  - `SlackStub` — `notify_handoff()` / `notify_escalation()` visibles en Terminal 1
+  - `GET /operator/dashboard` — métricas del pipeline en tiempo real
+  - `demo/run_happy_path.py` — rich UI con prospect view + operator dashboard
+  - `demo/metrics.sql` — 4 queries para Supabase SQL Editor
 
-### Alcance del prototipo (48h)
+### Fuera de alcance del prototipo (documentado, no implementado)
 
-- ✅ **[Hito 1]** LLM Gateway funcional con 4 proveedores (OpenRouter, Anthropic, OpenAI, Ollama Cloud)
-- ✅ **[Hito 2]** Persistencia en Supabase con RLS y políticas multi-tenant activadas
-- ✅ **[Hito 3]** Researcher Agent — enrichment + embedding de leads
-- ✅ **[Hito 4]** Copywriter Agent — mensaje outbound personalizado
-- ✅ **[Hito 5]** Intent Classifier — 9 categorías, handoff automático
-- ⏳ Memory Service (memoria dual: short-term textual + long-term RAG pgvector)
-- ⏳ Conversationalist + Evaluator (Confidence Gate)
-- ⏳ Orchestrator coordinando el pipeline completo
-- ⏳ Workflow en n8n self-hosted (n8n.stivenyepes.com) disparando el flujo end-to-end
-- ⏳ Demo del happy path con datos reales del ICP mexicano (fintech B2B)
+- **Integración real con LinkedIn API** — simulada con `LinkedInMockAdapter` que loguea `channel.linkedin.send`
+- **Integración real con Slack** — simulada con `SlackStub` que loguea `slack.handoff_alert` / `slack.escalation_alert`
+- **Objection Handler especializado** — cubierto por Conversationalist en el prototipo
+- **Re-engagement automatizado del estado `dormant`** — estado definido en la máquina de estados, no implementado
+- **Debouncing real** — en producción requiere worker con timer reset; no implementado en el prototipo
+- **Advisory locks bajo contención real** — single-worker en el prototipo
+- **Demo con múltiples tenants simultáneos** — el diseño RLS multi-tenant sí está implementado; la demo usa un solo tenant
 
-### Fuera de alcance para el prototipo (documentado, no implementado)
+### Decisiones de implementación que difieren del diseño original
 
-- ❌ Integración real con LinkedIn API (simulada con adapter mock)
-- ❌ Objection Handler especializado (cubierto por Conversationalist en el prototipo)
-- ❌ Dashboard de métricas (queries SQL como sustituto)
-- ❌ Re-engagement automatizado del estado `dormant`
-- ❌ Debouncing real (simulado con delay simple; en producción requiere worker con timer reset)
-- ❌ Advisory locks bajo contención real (single-worker en el prototipo)
-- ❌ Demo con múltiples tenants simultáneos (el diseño multi-tenant con RLS sí está implementado en schema y políticas; el prototipo solo prueba con un tenant para simplicidad de la demo)
-
-### Decisiones diferidas
-
-- Selección final de modelos por tarea (depende de benchmarks)
-- Política exacta de retry y backoff (depende de comportamiento real de APIs)
+| Componente | Diseño original | Implementación real | Razón |
+|---|---|---|---|
+| Acceso a DB | SQLAlchemy + asyncpg | supabase-py async (REST/HTTPS) | DB host directo solo IPv6 en WSL2; supabase-py usa CloudFlare IPv4 |
+| LLM providers | OpenAI + Anthropic como principales | OpenRouter como default | Más barato para el demo; cubre múltiples modelos con una key |
+| Canales | LinkedIn/Email/Calendar reales | Mocks con structlog | App de LinkedIn requiere aprobación; OAuth fuera del alcance del prototipo |
+| Slack | Webhook real | SlackStub con log.warning | Sin credenciales; el log es suficiente para la demo visual |
+| Debouncing | 30-90s jitter + timer reset | Sin implementar | Prototipo: procesamiento inmediato; no afecta la demo |
 
 ---
 

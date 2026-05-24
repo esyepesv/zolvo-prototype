@@ -1,19 +1,16 @@
 {
   "id": "LDjEhcuc7DMNRywX",
-  "name": "Zolvo \u2014 Reply Received",
+  "name": "Zolvo — Reply Received",
   "nodes": [
     {
       "id": "r1",
-      "name": "Webhook \u2014 Reply",
+      "name": "Webhook — Reply",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        240,
-        300
-      ],
+      "position": [240, 300],
       "parameters": {
         "path": "zolvo-reply",
-        "responseMode": "lastNode",
+        "responseMode": "responseNode",
         "httpMethod": "POST"
       },
       "webhookId": "zolvo-reply"
@@ -23,10 +20,7 @@
       "name": "POST /events/reply",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [
-        480,
-        300
-      ],
+      "position": [500, 300],
       "parameters": {
         "method": "POST",
         "url": "http://localhost:8000/events/reply",
@@ -41,37 +35,181 @@
       "name": "Respond to Webhook",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [
-        720,
-        300
-      ],
+      "position": [760, 300],
       "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $json }}"
       }
+    },
+    {
+      "id": "r4",
+      "name": "Switch — Routing por acción",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [500, 540],
+      "parameters": {
+        "mode": "rules",
+        "options": {},
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "s1",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "send",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "send"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "s2",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "handoff",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "handoff"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "conditions": [
+                  {
+                    "id": "s3",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "escalate",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "escalate"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "r5",
+      "name": "LinkedIn — Enviar Respuesta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [760, 440],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.linkedin.com/v2/messages",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"body\": $json.draft } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "r6",
+      "name": "Slack — Alerta Handoff (asignar SDR)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [760, 560],
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/PLACEHOLDER/PLACEHOLDER/PLACEHOLDER",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"text\": \"⚠️ Handoff requerido. Intent: \" + $json.intent + \". Asignar a SDR.\" } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "r7",
+      "name": "Slack — Escalación (revisar draft)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [760, 680],
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/PLACEHOLDER/PLACEHOLDER/PLACEHOLDER",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"text\": \"🔴 Draft bloqueado — Gate 2. Score: \" + $json.confidence_score + \". Revisar antes de enviar.\" } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "r8",
+      "name": "IF — ¿intent == meeting_intent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1020, 440],
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "m1",
+              "leftValue": "={{ $json.intent }}",
+              "rightValue": "meeting_intent",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "r9",
+      "name": "Google Calendar — Crear Evento",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1280, 380],
+      "parameters": {
+        "method": "POST",
+        "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"summary\": \"Demo Zolvo — \" + $json.intent, \"start\": { \"dateTime\": $now.plus(2, 'days').toISO() }, \"end\": { \"dateTime\": $now.plus(2, 'days').plus(30, 'minutes').toISO() } } }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "r10",
+      "name": "Slack — Reunión agendada ✅",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1280, 520],
+      "parameters": {
+        "method": "POST",
+        "url": "https://hooks.slack.com/services/PLACEHOLDER/PLACEHOLDER/PLACEHOLDER",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"text\": \"✅ Reunión agendada. Evento creado en Google Calendar.\" }",
+        "options": {}
+      }
     }
   ],
   "connections": {
-    "Webhook \u2014 Reply": {
+    "Webhook — Reply": {
       "main": [
-        [
-          {
-            "node": "POST /events/reply",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "POST /events/reply", "type": "main", "index": 0 }]
       ]
     },
     "POST /events/reply": {
       "main": [
-        [
-          {
-            "node": "Respond to Webhook",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Respond to Webhook", "type": "main", "index": 0 }]
       ]
     }
   },

@@ -15,7 +15,7 @@
 | Tiempo disponible | ~30h efectivas |
 | Hito actual | **Hito 12 — COMPLETADO** |
 | Próximo hito | — (todos los hitos completados) |
-| Último commit | `feat: Hito 12 — polish para el video (README final + métricas SQL)` |
+| Último commit | `feat: persist intent_classifier runs to agent_runs for dashboard metrics` |
 
 ---
 
@@ -252,6 +252,8 @@ bash scripts/verify.sh
 
 **Diseño:** el Orchestrator solo orquesta — no tiene acceso directo a memoria ni a repositorios; el draft se propaga siempre en `escalate` para que el humano pueda revisarlo.
 
+**Actualización posterior (post-Hito 12):** `AgentRunRepository` pasado al Orchestrator vía constructor. Después de clasificar intent, persiste un `agent_run` con `agent_name="intent_classifier"` y `output_payload={"intent": ..., "should_handoff": ...}`. Esto habilita `intent_distribution` en el dashboard del operador. Tests actualizados con mock de `AgentRunRepository`.
+
 ---
 
 ### ✅ Hito 10 — n8n workflow vía API
@@ -298,11 +300,31 @@ bash scripts/verify.sh
 
 ### ✅ Hito 12 — Polish para el video
 
-**DoD cumplido:** README final reproducible en < 10 min | métricas SQL listas | structlog ya configurado
+**DoD cumplido:** README final reproducible en < 10 min | métricas SQL listas | structlog ya configurado | demo script con rich UI completo | channel stubs visibles en Terminal 1 | operator dashboard | prospect view
 
-**Archivos creados/modificados:**
+**Archivos creados:**
 - `demo/metrics.sql` — 4 queries para Supabase SQL Editor: cost per agent, confidence scores, intent distribution, pipeline totals
-- `README.md` — reescrito con quickstart completo, diagrama del pipeline, sample output del demo, tabla de hitos
+- `src/zolvo/channels/base.py` — `ChannelAdapter` ABC + `SendResult` dataclass
+- `src/zolvo/channels/linkedin_mock.py` — `LinkedInMockAdapter` que loguea `channel.linkedin.send` via structlog
+- `src/zolvo/channels/email_mock.py` — `EmailMockAdapter` que loguea `channel.email.send`
+- `src/zolvo/channels/slack_stub.py` — `SlackStub` con `notify_handoff()` y `notify_escalation()` (log.warning visible en Terminal 1)
+- `src/zolvo/api/routes/operator.py` — `GET /operator/dashboard`: agrega pipeline counts, costs by agent, intent distribution, pending escalations desde `agent_runs`
+
+**Archivos modificados:**
+- `src/zolvo/api/routes/events.py` — tras `action=send` llama `LinkedInMockAdapter.send_message()`, tras `handoff` llama `SlackStub.notify_handoff()`, tras `escalate` llama `SlackStub.notify_escalation()`
+- `src/zolvo/api/deps.py` — añadidas factories: `get_linkedin_adapter()`, `get_email_adapter()`, `get_slack_stub()`
+- `src/zolvo/api/main.py` — registra `operator_router` (`GET /operator/dashboard`)
+- `src/zolvo/orchestrator/orchestrator.py` — acepta `AgentRunRepository`, persiste run de `intent_classifier` después de clasificar
+- `demo/run_happy_path.py` — reescrito completo con rich: panels coloreados, spinners, tabla de summary, vista del prospecto (LinkedIn inbox simulation), dashboard del operador
+- `requirements.txt` — añadido `rich>=13.0.0`
+- `README.md` — reescrito con sample output actualizado, sección de canales, tabla de endpoints, dashboard del operador
+
+**Resumen visual del demo en Terminal 2:**
+1. STEP 1 — Ingest: mensaje outbound generado
+2. STEP 2-4 — 3 turnos con panels del prospecto y respuestas del agente
+3. PIPELINE SUMMARY — tabla con Gate 1/Gate 2, scores, intent path
+4. VISTA DEL PROSPECTO — simulación de inbox LinkedIn (ambos lados del hilo)
+5. DASHBOARD DEL OPERADOR — métricas del pipeline, costos por agente, distribución de intents
 
 ---
 
@@ -311,9 +333,12 @@ bash scripts/verify.sh
 - [x] Hitos 0-12 completados
 - [x] `pytest -q` → 54 passed
 - [x] `ruff check .` → All checks passed
-- [x] Demo end-to-end corre sin intervención manual
+- [x] Demo end-to-end corre sin intervención manual (`python demo/run_happy_path.py`)
 - [x] README permite clonar, instalar y correr en < 10 min
-- [x] Métricas visibles al final del happy path (via `demo/metrics.sql`)
+- [x] Métricas visibles al final del happy path (dashboard del operador en el demo + `demo/metrics.sql` para Supabase)
+- [x] Channel stubs visibles en Terminal 1 (channel.linkedin.send, slack alerts)
+- [x] Vista del prospecto (LinkedIn inbox simulation) en Terminal 2
+- [x] Dashboard del operador con costos por agente, intent distribution, escalaciones pendientes
 - [x] Código refleja las decisiones del documento de arquitectura
 
 **El video se puede grabar.**
