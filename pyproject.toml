@@ -21,6 +21,7 @@ src = ["src"]
 select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
 ignore = [
     "ANN401",  # Any allowed where needed
+    "B008",    # FastAPI Depends() in function signatures is the intended pattern
 ]
 
 [tool.ruff.lint.per-file-ignores]
