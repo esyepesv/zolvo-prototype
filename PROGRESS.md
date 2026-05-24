@@ -73,11 +73,14 @@ bash scripts/verify.sh
 |---|---|
 | pip + requirements.txt (no uv/poetry) | Elección del autor |
 | Layout `src/` | Evita import ambigüedad sin instalar el paquete |
-| Supabase Cloud | El autor crea el proyecto en supabase.com |
+| Supabase Cloud (proyecto "Challenge Zolvo") | Creado en supabase.com, región us-west-1 |
 | CI: Python 3.11 + 3.12 | Sistema local solo tiene 3.12; CI valida ambas |
 | `pyproject.toml` solo para tooling | Derivado de decisión pip |
 | structlog con PrintLoggerFactory | `add_logger_name` removido (incompatible con PrintLogger) |
 | Git branch: `main` | Inicializado en Hito 0 |
+| `supabase-py` en vez de SQLAlchemy+asyncpg | Host directo de Supabase es solo IPv6 en WSL2; Supavisor pooler no reconoce el proyecto; supabase-py usa REST/HTTPS vía CloudFlare IPv4 |
+| Modelos Pydantic (no ORM) | Consecuencia del cambio a supabase-py — dict de respuesta se mapea directamente |
+| PREFERRED_LLM_PROVIDER=openrouter | Más barato para el demo; fallback: ollama → anthropic → openai |
 
 ---
 
@@ -104,11 +107,7 @@ bash scripts/verify.sh
 - `n8n/workflows/.gitkeep`
 - `scripts/verify.sh` — script de verificación
 
-**Supabase:** migrations escritas pero NO ejecutadas. El autor debe:
-1. Crear proyecto en supabase.com
-2. Correr `supabase/migrations/00000000000000_init.sql` en el SQL Editor
-3. Correr `supabase/seed.sql`
-4. Llenar `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` en `.env`
+**Supabase:** ✅ Migrations aplicadas vía MCP. Proyecto "Challenge Zolvo" (id: `diweoapyicjomzljkohx`, región us-west-1). Tenant demo insertado. Variables en `.env` ya configuradas.
 
 **Verificación:** `bash scripts/verify.sh` → todos los checks pasan
 
@@ -140,8 +139,6 @@ bash scripts/verify.sh
 
 ---
 
----
-
 ### ✅ Hito 2 — Modelo de datos y repositorios
 
 **DoD cumplido:** `ruff check .` → OK | `pytest -q` → 12 passed | integración real contra Supabase Cloud
@@ -165,21 +162,21 @@ bash scripts/verify.sh
 
 ## Próximo hito — Hito 3: Researcher Agent
 
-**Prerequisito:** ✅ Supabase configurado y repositorios funcionando.
+**Prerequisito:** ✅ Supabase configurado, repositorios funcionando, supabase-py async disponible.
 
 **Qué construir:**
 
-1. `supabase/migrations/00000000000001_domain_tables.sql` — tablas: `leads`, `conversations`, `messages`, `agent_runs`, `lead_embeddings`, `conversation_summaries_embeddings`, `events_outbox`; RLS + índices con `tenant_id`
-2. `src/zolvo/models/domain.py` — SQLAlchemy 2.x mapped classes (async)
-3. `src/zolvo/repositories/base.py` — `BaseRepository` abstracto con sesión async
-4. `src/zolvo/repositories/leads.py` — `LeadRepository.create()` y `LeadRepository.get_by_id()`
-5. `src/zolvo/repositories/conversations.py` — `ConversationRepository`
-6. `src/zolvo/repositories/messages.py` — `MessageRepository`
-7. `src/zolvo/repositories/agent_runs.py` — `AgentRunRepository.create()` (logging de LLM calls)
-8. `src/zolvo/api/deps.py` — `get_db_session()` dependency para FastAPI
-9. Tests de integración: crear lead → leer lead → verificar RLS bloquea cross-tenant
+1. `src/zolvo/agents/base.py` — `AgentBase` abstracto con `run()` async y acceso a `LLMGateway` + `AgentRunRepository`
+2. `src/zolvo/agents/researcher.py` — `ResearcherAgent.run(lead_id)`:
+   - Consulta el lead desde `LeadRepository`
+   - Genera enrichment (industria, ICP fit, contexto de empresa) vía `LLMGateway` con `task_type="generation_standard"`
+   - Genera embedding del perfil via API de embeddings (OpenAI `text-embedding-3-small` o equivalente)
+   - Persiste resultado en `leads.enriched_data` y en `lead_embeddings`
+   - Registra `agent_runs` con costo + latencia
+3. `src/zolvo/llm/prompts/researcher.txt` — prompt de enrichment en español
+4. Tests unitarios con `FakeLLMProvider` y un lead sintético
 
-**DoD:** `LeadRepository.create()` y `LeadRepository.get_by_id()` funcionan contra Supabase real.
+**DoD:** `researcher.run(lead_id)` enriquece un lead de prueba y guarda el embedding en Supabase.
 
 ---
 

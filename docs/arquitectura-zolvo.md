@@ -765,7 +765,8 @@ events_outbox
 | Orquestación visible | n8n | Cumplimiento explícito del brief, visibilidad para sales rep |
 | Lógica de agentes | Python + FastAPI | Ecosistema LLM más maduro, tipado con Pydantic, async nativo |
 | Base de datos | Supabase Postgres + pgvector | Cumplimiento del brief, RLS nativo, realtime, embeddings sin servicio extra |
-| LLM providers | OpenAI, Anthropic, Ollama, OpenRouter | Strategy pattern; agnóstico |
+| Acceso a datos | supabase-py async (REST/HTTPS) | Host directo Postgres es solo IPv6 en entorno WSL2; supabase-py usa CloudFlare IPv4 sin cambios de arquitectura lógica |
+| LLM providers | OpenRouter (default), Anthropic, OpenAI, Ollama Cloud | Strategy pattern; agnóstico; OpenRouter como gateway unificado y más barato para el demo |
 | Canales | LinkedIn, Gmail/Outlook, Google Calendar | Estándar de outbound B2B |
 | Observabilidad | OpenTelemetry + logs estructurados | Estándar, agnóstico a vendor |
 | Notificaciones | Slack webhooks | Habitual en equipos B2B |
@@ -805,22 +806,23 @@ Esta fórmula es defendible porque cada variable se mide desde la base de datos,
 
 ### Lo que falta antes del prototipo
 
-- [ ] Estructura del proyecto Python (monorepo con paquetes)
-- [ ] Contratos de interfaz para `LLMProvider`, `ChannelAdapter`, `Agent`, `Repository`
-- [ ] Definición de prompts base (Copywriter, Conversationalist, Evaluator)
-- [ ] Configuración de Supabase: migrations, RLS policies, seed data
-- [ ] Workflow de n8n para el happy path
-- [ ] Dataset sintético de leads ICP México (fintech B2B)
+- [x] Estructura del proyecto Python (monorepo con paquetes) — Hito 0
+- [x] Contratos de interfaz para `LLMProvider` y `Repository` — Hitos 1 y 2
+- [x] Configuración de Supabase: migrations, RLS policies, seed data — Hito 2
+- [ ] Contratos de interfaz para `ChannelAdapter` y `Agent` — Hito 3+
+- [ ] Definición de prompts base (Researcher, Copywriter, Conversationalist, Evaluator)
+- [ ] Workflow de n8n para el happy path — Hito 10
+- [ ] Dataset sintético de leads ICP México (fintech B2B) — Hito 11
 
 ### Alcance del prototipo (48h)
 
-- ✅ LLM Gateway funcional con al menos 2 proveedores (Strategy pattern real)
-- ✅ Intent Classifier + Confidence Gate (las dos puertas del pipeline, ADR-04)
-- ✅ Researcher + Copywriter + Conversationalist funcionales
-- ✅ Memoria dual: chat_history textual + RAG con pgvector (ADR-07)
-- ✅ Persistencia en Supabase con RLS y políticas multi-tenant activadas
-- ✅ Workflow básico en n8n disparando el flujo end-to-end
-- ✅ Demo del happy path con datos reales del ICP mexicano (fintech B2B)
+- ✅ **[Hito 1]** LLM Gateway funcional con 4 proveedores (OpenRouter, Anthropic, OpenAI, Ollama Cloud)
+- ✅ **[Hito 2]** Persistencia en Supabase con RLS y políticas multi-tenant activadas
+- ⏳ Intent Classifier + Confidence Gate (las dos puertas del pipeline, ADR-04)
+- ⏳ Researcher + Copywriter + Conversationalist funcionales
+- ⏳ Memoria dual: chat_history textual + RAG con pgvector (ADR-07)
+- ⏳ Workflow básico en n8n disparando el flujo end-to-end
+- ⏳ Demo del happy path con datos reales del ICP mexicano (fintech B2B)
 
 ### Fuera de alcance para el prototipo (documentado, no implementado)
 
