@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 6 — COMPLETADO** |
-| Próximo hito | **Hito 7 — Conversationalist Agent** |
-| Último commit | `feat: Hito 6 — Memory Service con memoria dual (textual + semántica)` |
+| Hito actual | **Hito 7 — COMPLETADO** |
+| Próximo hito | **Hito 8 — Evaluator / Confidence Gate** |
+| Último commit | `feat: Hito 7 — Conversationalist Agent con memoria dual y guía por intent` |
 
 ---
 
@@ -30,7 +30,7 @@
 | 4 | Copywriter Agent | ✅ COMPLETADO | ✅ |
 | 5 | Intent Classifier (Puerta 1) | ✅ COMPLETADO | ✅ |
 | 6 | Memory Service (memoria dual) | ✅ COMPLETADO | ✅ |
-| 7 | Conversationalist Agent | ⏳ PENDIENTE | — |
+| 7 | Conversationalist Agent | ✅ COMPLETADO | ✅ |
 | 8 | Evaluator / Confidence Gate (Puerta 2) | ⏳ PENDIENTE | — |
 | 9 | Orchestrator | ⏳ PENDIENTE | — |
 | 10 | n8n workflow vía MCP | ⏳ PENDIENTE | — |
@@ -216,20 +216,31 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 7: Conversationalist Agent
+### ✅ Hito 7 — Conversationalist Agent
 
-**Prerequisito:** ✅ Memory Service funcional (short + long term)
+**DoD cumplido:** `ruff check .` → OK | `pytest -q` → 43 passed
+
+**Archivos creados:**
+- `src/zolvo/agents/conversationalist.py` — `ConversationalistAgent.run()` con memoria dual, guía por intent, registro de `agent_runs`
+- `src/zolvo/llm/prompts/conversationalist.txt` — prompt español B2B México con 8 reglas de redacción
+- `tests/unit/test_conversationalist.py` — 5 tests (draft, memoria dual, agent_run, memoria vacía, 9 intents)
+
+**Decisión técnica:** `get_long_term()` recibe `tenant_id` como kwarg (no posicional) para permitir assertions en tests.
+
+---
+
+## Próximo hito — Hito 8: Evaluator / Confidence Gate
+
+**Prerequisito:** ✅ Conversationalist Agent funcional
 
 **Qué construir:**
 
-1. `src/zolvo/agents/conversationalist.py` — `Conversationalist`:
-   - Mantiene threads multi-turn
-   - Consume memoria dual vía `MemoryService`
-   - Recibe el `intent` ya clasificado y ajusta su comportamiento
-2. `src/zolvo/llm/prompts/conversationalist.txt` — prompt español para la respuesta
-3. Tests unitarios
+1. `src/zolvo/agents/evaluator.py` — `Evaluator.evaluate(draft, context)` → `EvaluationResult`
+   - Score en 3 ejes: naturalidad, relevancia, riesgo
+   - Umbral configurable vía `Settings.confidence_threshold`
+2. Tests con drafts buenos y malos usando `FakeLLMProvider`
 
-**DoD:** mantiene un thread coherente respondiendo de forma acorde al intent detectado y usando su memoria.
+**DoD:** drafts obviamente malos son rechazados; drafts buenos pasan.
 
 ---
 
