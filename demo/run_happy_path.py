@@ -163,7 +163,7 @@ def main() -> None:
     print(f"\n  Sends            : {send_count}")
     print(f"  Escalations      : {escalate_count}")
     print(f"  Handoffs         : {handoff_count}")
-    print(f"\n  Stages: ingest → classify → generate → evaluate → route  ✓")
+    print("\n  Stages: ingest → classify → generate → evaluate → route  ✓")
     print("\n" + "=" * 62 + "\n")
 
 

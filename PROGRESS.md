@@ -13,9 +13,9 @@
 | Deadline absoluto | 25 may 2026, 17:58 COT |
 | Fecha inicio | 24 may 2026 |
 | Tiempo disponible | ~30h efectivas |
-| Hito actual | **Hito 11 — COMPLETADO** |
-| Próximo hito | **Hito 12 — Polish para el video** |
-| Último commit | `feat: Hito 11 — demo end-to-end + fix embed + fix JSON parsing + fix pgvector search_path` |
+| Hito actual | **Hito 12 — COMPLETADO** |
+| Próximo hito | — (todos los hitos completados) |
+| Último commit | `feat: Hito 12 — polish para el video (README final + métricas SQL)` |
 
 ---
 
@@ -35,7 +35,7 @@
 | 9 | Orchestrator | ✅ COMPLETADO | ✅ |
 | 10 | n8n workflow vía MCP | ✅ COMPLETADO | ✅ |
 | 11 | Dataset sintético + demo end-to-end | ✅ COMPLETADO | ✅ |
-| 12 | Polish para el video | ⏳ PENDIENTE | — |
+| 12 | Polish para el video | ✅ COMPLETADO | ✅ |
 
 ---
 
@@ -296,20 +296,27 @@ bash scripts/verify.sh
 
 ---
 
-## Próximo hito — Hito 12: Polish para el video
+### ✅ Hito 12 — Polish para el video
 
-**Prerequisito:** ✅ Demo end-to-end funcional
+**DoD cumplido:** README final reproducible en < 10 min | métricas SQL listas | structlog ya configurado
 
-**Qué construir:**
+**Archivos creados/modificados:**
+- `demo/metrics.sql` — 4 queries para Supabase SQL Editor: cost per agent, confidence scores, intent distribution, pipeline totals
+- `README.md` — reescrito con quickstart completo, diagrama del pipeline, sample output del demo, tabla de hitos
 
-1. Logs legibles para grabar en pantalla (ya hay structlog; ajustar niveles/formato si es necesario)
-2. Queries SQL preparadas para mostrar métricas al final del happy path:
-   - `cost_per_message` — costo promedio por mensaje enviado
-   - `confidence_score_avg` — promedio del score del evaluador
-   - `intent_distribution` — distribución de intents detectados
-3. README final: instrucciones reproducibles para clonar, instalar y correr en < 10 min
+---
 
-**DoD:** el repo se ve profesional al primer scroll; se puede grabar el video.
+## Estado final del proyecto — Definition of Done
+
+- [x] Hitos 0-12 completados
+- [x] `pytest -q` → 54 passed
+- [x] `ruff check .` → All checks passed
+- [x] Demo end-to-end corre sin intervención manual
+- [x] README permite clonar, instalar y correr en < 10 min
+- [x] Métricas visibles al final del happy path (via `demo/metrics.sql`)
+- [x] Código refleja las decisiones del documento de arquitectura
+
+**El video se puede grabar.**
 
 ---
 
