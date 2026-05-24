@@ -10,53 +10,53 @@ from zolvo.llm.base import LLMProvider, LLMProviderError, LLMRequest, LLMRespons
 
 log = structlog.get_logger(__name__)
 
-# Default model when none specified. Override via OLLAMA_MODEL env var.
-_DEFAULT_MODEL = "qwen3-coder"
+# Ollama Cloud uses OpenAI-compatible format at ollama.com.
+_API_URL = "https://ollama.com/v1/chat/completions"
 
-# Ollama natively implements the Anthropic Messages API at the same endpoint.
-# Docs: https://ollama.com/blog/openai-compatibility (Anthropic compat since v0.14+)
-_API_PATH = "/api/messages"
+# Map task types to model sizes: cheap for classification, large for critical generation.
+_MODELS: dict[str, str] = {
+    "classification": "gemma3:4b",
+    "generation_standard": "gemma3:12b",
+    "generation_critical": "gemma4:31b",
+    "embedding": "gemma3:4b",
+}
 
 
 class OllamaProvider(LLMProvider):
-    """Ollama local provider via Anthropic Messages API.
+    """Ollama Cloud provider via OpenAI-compatible API.
 
-    Ollama v0.14+ exposes an Anthropic-compatible endpoint, so this provider
-    reuses the same request/response shape as AnthropicProvider but points at
-    the local Ollama instance. No internet required; ideal for PII-sensitive tasks.
+    Uses ollama.com public endpoint with bearer token auth.
+    Models available: gemma4:31b (critical), gemma3:12b (standard), gemma3:4b (cheap).
     """
 
-    def __init__(
-        self, base_url: str = "http://localhost:11434", model: str = _DEFAULT_MODEL
-    ) -> None:
-        self._base_url = base_url.rstrip("/")
-        self._model = model
+    def __init__(self, api_key: str) -> None:
+        self._api_key = api_key
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     async def complete(self, request: LLMRequest) -> LLMResponse:
-        messages: list[dict[str, str]] = [{"role": "user", "content": request.prompt}]
+        model = _MODELS.get(request.task_type, _MODELS["generation_standard"])
+
+        messages: list[dict[str, str]] = []
+        if request.system_prompt:
+            messages.append({"role": "system", "content": request.system_prompt})
+        messages.append({"role": "user", "content": request.prompt})
 
         payload: dict[str, object] = {
-            "model": self._model,
+            "model": model,
             "messages": messages,
             "max_tokens": request.max_tokens,
+            "temperature": request.temperature,
         }
-        if request.system_prompt:
-            payload["system"] = request.system_prompt
-        if request.temperature is not None:
-            payload["temperature"] = request.temperature
 
         headers = {
-            "x-api-key": "ollama",
-            "anthropic-version": "2023-06-01",
+            "Authorization": f"Bearer {self._api_key}",
             "content-type": "application/json",
         }
 
-        url = f"{self._base_url}{_API_PATH}"
         t0 = time.monotonic()
         try:
-            async with httpx.AsyncClient(timeout=120) as client:
-                resp = await client.post(url, json=payload, headers=headers)
+            async with httpx.AsyncClient(timeout=60) as client:
+                resp = await client.post(_API_URL, json=payload, headers=headers)
                 resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
             raise LLMProviderError(
@@ -68,14 +68,14 @@ class OllamaProvider(LLMProvider):
         latency_ms = int((time.monotonic() - t0) * 1000)
         data = resp.json()
 
-        content = data["content"][0]["text"]
-        tokens_in = data["usage"]["input_tokens"]
-        tokens_out = data["usage"]["output_tokens"]
+        content = data["choices"][0]["message"]["content"]
+        tokens_in = data["usage"]["prompt_tokens"]
+        tokens_out = data["usage"]["completion_tokens"]
 
         log.info(
             "llm.complete",
             provider=self.provider_name,
-            model=self._model,
+            model=model,
             task_type=request.task_type,
             tokens_in=tokens_in,
             tokens_out=tokens_out,
@@ -85,7 +85,7 @@ class OllamaProvider(LLMProvider):
 
         return LLMResponse(
             content=content,
-            model=self._model,
+            model=model,
             provider=self.provider_name,
             tokens_in=tokens_in,
             tokens_out=tokens_out,

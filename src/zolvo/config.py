@@ -20,8 +20,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     anthropic_api_key: str = Field(default="")
     openrouter_api_key: str = Field(default="")
-    ollama_base_url: str = Field(default="http://localhost:11434")
-    ollama_model: str = Field(default="qwen3-coder")
+    ollama_api_key: str = Field(default="")
 
     # Multi-tenancy
     default_tenant_id: str = Field(default="00000000-0000-0000-0000-000000000001")

@@ -33,11 +33,8 @@ class LLMGateway:
         # Priority order for demo: openrouter → ollama → anthropic → openai
         if self._settings.openrouter_api_key:
             self._providers["openrouter"] = OpenRouterProvider(self._settings.openrouter_api_key)
-        # Ollama is always available locally; register unconditionally.
-        self._providers["ollama"] = OllamaProvider(
-            base_url=self._settings.ollama_base_url,
-            model=self._settings.ollama_model,
-        )
+        if self._settings.ollama_api_key:
+            self._providers["ollama"] = OllamaProvider(self._settings.ollama_api_key)
         if self._settings.anthropic_api_key:
             self._providers["anthropic"] = AnthropicProvider(self._settings.anthropic_api_key)
         if self._settings.openai_api_key:
