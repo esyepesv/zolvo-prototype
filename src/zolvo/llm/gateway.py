@@ -4,7 +4,14 @@ import structlog
 
 from zolvo.config import Settings
 from zolvo.llm.anthropic_provider import AnthropicProvider
-from zolvo.llm.base import LLMProvider, LLMProviderError, LLMRequest, LLMResponse, TaskType
+from zolvo.llm.base import (
+    EmbeddingResponse,
+    LLMProvider,
+    LLMProviderError,
+    LLMRequest,
+    LLMResponse,
+    TaskType,
+)
 from zolvo.llm.ollama_provider import OllamaProvider
 from zolvo.llm.openai_provider import OpenAIProvider
 from zolvo.llm.openrouter_provider import OpenRouterProvider
@@ -60,6 +67,19 @@ class LLMGateway:
         )
         log.debug("llm.gateway.routing", provider=provider.provider_name, task_type=task_type)
         return await provider.complete(request)
+
+    async def embed(self, text: str) -> EmbeddingResponse:
+        """Generate a text embedding. Tries providers in priority order until one succeeds."""
+        order = ["openai", *[k for k in self._providers if k != "openai"]]
+        for name in order:
+            provider = self._providers.get(name)
+            if provider is None:
+                continue
+            try:
+                return await provider.embed(text)
+            except NotImplementedError:
+                continue
+        raise LLMProviderError("No embedding provider available. Set OPENAI_API_KEY.")
 
     def _select_provider(self, task_type: TaskType) -> LLMProvider:
         if not self._providers:

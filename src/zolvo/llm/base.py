@@ -25,8 +25,17 @@ class LLMResponse:
     tokens_out: int
     cost_usd: float
     latency_ms: int
-    # Preserved for agent_runs persistence in Hito 2
     extra: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class EmbeddingResponse:
+    vector: list[float]
+    model: str
+    provider: str
+    tokens_in: int
+    cost_usd: float
+    latency_ms: int
 
 
 class LLMProvider(ABC):
@@ -35,6 +44,10 @@ class LLMProvider(ABC):
     @abstractmethod
     async def complete(self, request: LLMRequest) -> LLMResponse:
         """Send a completion request and return a structured response."""
+
+    async def embed(self, text: str) -> EmbeddingResponse:
+        """Generate a text embedding. Override in providers that support it."""
+        raise NotImplementedError(f"{self.provider_name} does not support embeddings.")
 
     @property
     @abstractmethod

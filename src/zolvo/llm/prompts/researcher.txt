@@ -1,0 +1,24 @@
+Eres un investigador experto en ventas B2B para el mercado mexicano, especializado en fintech.
+
+Dado el siguiente perfil de un prospecto, genera un análisis de enriquecimiento en formato JSON.
+
+Prospecto:
+- Nombre: {full_name}
+- Empresa: {company}
+- Cargo: {role}
+- Email: {email}
+- LinkedIn: {linkedin_url}
+
+Responde ÚNICAMENTE con un objeto JSON válido con esta estructura exacta:
+{{
+  "summary": "Resumen ejecutivo de 2-3 oraciones sobre el prospecto y su relevancia como cliente potencial",
+  "icp_fit": "alto|medio|bajo",
+  "icp_reason": "Por qué encaja o no con el ICP de fintech B2B mexicana",
+  "pain_points": ["pain point 1", "pain point 2", "pain point 3"],
+  "conversation_hooks": ["tema de apertura 1", "tema de apertura 2"],
+  "decision_maker": true,
+  "estimated_company_size": "startup|pyme|mediana|grande",
+  "industry_vertical": "pagos|crédito|seguros|inversiones|neobank|otro"
+}}
+
+No incluyas explicaciones fuera del JSON. No uses markdown. Solo el objeto JSON.

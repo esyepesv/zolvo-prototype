@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from zolvo.llm.base import LLMProvider, LLMRequest, LLMResponse
+from zolvo.llm.base import EmbeddingResponse, LLMProvider, LLMRequest, LLMResponse
+
+_FAKE_EMBED_DIM = 1536
 
 
 class FakeLLMProvider(LLMProvider):
@@ -20,6 +22,16 @@ class FakeLLMProvider(LLMProvider):
             provider=self.provider_name,
             tokens_in=len(request.prompt.split()),
             tokens_out=len(content.split()),
+            cost_usd=0.0,
+            latency_ms=0,
+        )
+
+    async def embed(self, text: str) -> EmbeddingResponse:
+        return EmbeddingResponse(
+            vector=[0.0] * _FAKE_EMBED_DIM,
+            model="fake-embed-1",
+            provider=self.provider_name,
+            tokens_in=len(text.split()),
             cost_usd=0.0,
             latency_ms=0,
         )

@@ -6,6 +6,8 @@ from typing import Any
 from zolvo.models.domain import Lead
 from zolvo.repositories.base import BaseRepository
 
+_LEAD_EMBEDDINGS_TABLE = "lead_embeddings"
+
 
 class LeadRepository(BaseRepository[Lead]):
     table_name = "leads"
@@ -64,3 +66,27 @@ class LeadRepository(BaseRepository[Lead]):
         if res.data:
             return Lead(**res.data[0])
         return None
+
+    async def save_embedding(
+        self,
+        *,
+        lead_id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        vector: list[float],
+        source_text: str,
+        model: str,
+    ) -> None:
+        await (
+            self._client.table(_LEAD_EMBEDDINGS_TABLE)
+            .upsert(
+                {
+                    "lead_id": str(lead_id),
+                    "tenant_id": str(tenant_id),
+                    "embedding": vector,
+                    "source_text": source_text,
+                    "model": model,
+                },
+                on_conflict="lead_id",
+            )
+            .execute()
+        )
