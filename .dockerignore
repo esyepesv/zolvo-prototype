@@ -1,0 +1,48 @@
+# Version control
+.git
+.gitignore
+.github
+
+# Local environment
+.env
+.env.*
+!.env.example
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Editor & OS
+.vscode
+.idea
+.DS_Store
+*.swp
+
+# Documentation and meta (not needed in runtime image)
+docs
+*.md
+LICENSE
+
+# Tests (excluded from runtime image)
+tests
+
+# Demo (only used locally)
+demo
+
+# Supabase migrations (applied separately)
+supabase
+
+# n8n workflows (deployed separately)
+n8n
+
+# Scripts
+scripts
+
+# Misc
+.mcp.json

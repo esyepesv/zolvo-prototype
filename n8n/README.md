@@ -1,38 +1,38 @@
-# n8n — Capa de orquestación visible
+# n8n — Visible Orchestration Layer
 
-## Por qué n8n tiene solo 3 nodos por workflow
+## Why n8n workflows have only 3 nodes each
 
-Esta arquitectura adopta el **patrón híbrido** (ADR-01 en `docs/arquitectura-zolvo.md`): n8n es la capa de integración de canales y workflows visibles para el equipo de ventas; los servicios Python son donde reside la lógica de agentes, evaluación y memoria.
+This architecture uses the **hybrid pattern** (ADR-01 in `docs/arquitectura-zolvo.md`): n8n is the channel integration and workflow visibility layer for the sales team; the Python services hold the agent logic, evaluation, and memory.
 
-**n8n hace:**
-- Recibir webhooks de canales externos (LinkedIn, email, formularios)
-- Disparar la API de Zolvo con los datos correctos
-- Enrutar según la respuesta (Slack si `handoff`, Calendar si `meeting_intent`)
-- Dar visibilidad operativa al sales rep via su UI nativa
-- Triggers programados (re-engagement de leads `dormant`)
+**n8n handles:**
+- Receiving webhooks from external channels (LinkedIn, email, forms)
+- Triggering the Zolvo API with the right data
+- Routing based on the API response (Slack if `handoff`, Calendar if `meeting_intent`)
+- Operational visibility for the sales rep via its native UI
+- Scheduled triggers (re-engagement of `dormant` leads)
 
-**Python hace:**
-- Lógica multi-agente (Researcher, Copywriter, Conversationalist, Evaluator)
-- LLM Gateway con routing por costo
+**Python handles:**
+- Multi-agent logic (Researcher, Copywriter, Conversationalist, Evaluator)
+- LLM Gateway with cost-based routing
 - Intent Classifier + Confidence Gate
-- Memoria dual con pgvector
-- Registros de trazabilidad y costo en `agent_runs`
+- Dual memory with pgvector
+- Traceability and cost records in `agent_runs`
 
-La alternativa (poner toda la lógica en nodos n8n) era inmantenible: lógica en JSON, sin tests unitarios, sin Strategy pattern, sin versionado real.
+The alternative — putting all logic in n8n nodes — was not maintainable: logic in JSON, no unit tests, no real versioning, no Strategy pattern.
 
 ---
 
-## Workflows actuales
+## Current workflows
 
 ### 1 · Zolvo — New Lead Ingestion (`5VEfQA0VC44iM6Zs`)
 
 ```
 [Webhook — New Lead]  →  [POST /agents/ingest]  →  [Respond to Webhook]
-POST /webhook/zolvo-new-lead                           devuelve JSON con
+POST /webhook/zolvo-new-lead                           returns JSON with
                                                        lead_id, subject, body
 ```
 
-**Qué hace:** recibe los datos de un lead nuevo (puede venir de un formulario, LinkedIn scraper, Airtable, Google Sheets) y dispara el pipeline completo: Researcher → enriquecimiento → Copywriter → mensaje outbound.
+**What it does:** receives new lead data (from a form, LinkedIn scraper, Airtable, Google Sheets) and triggers the full pipeline: Researcher → enrichment → Copywriter → outbound message.
 
 **Webhook URL:** `https://n8n.stivenyepes.com/webhook/zolvo-new-lead`
 
@@ -42,39 +42,40 @@ POST /webhook/zolvo-new-lead                           devuelve JSON con
 
 ```
 [Webhook — Reply]  →  [POST /events/reply]  →  [Respond to Webhook]
-POST /webhook/zolvo-reply                          devuelve JSON con
+POST /webhook/zolvo-reply                          returns JSON with
                                                    action, intent, draft, score
 ```
 
-**Qué hace:** recibe la respuesta de un prospecto (puede venir de un webhook de LinkedIn, de la bandeja de Gmail, de un CRM). Pasa el mensaje por el pipeline de dos puertas: Gate 1 (Intent Classifier) + Gate 2 (Confidence Gate) y devuelve la decisión de routing.
+**What it does:** receives a prospect's reply (from a LinkedIn webhook, Gmail inbox, or CRM). Passes the message through the two-gate pipeline: Gate 1 (Intent Classifier) + Gate 2 (Confidence Gate) and returns the routing decision.
 
 **Webhook URL:** `https://n8n.stivenyepes.com/webhook/zolvo-reply`
 
 ---
 
-## Simulación de un flujo real en México
+## Simulating a real Mexico B2B flow
 
-### El contexto del reto
+### Background
 
-El ICP de Zolvo en México son fintechs B2B: empresas de crédito digital, procesadores de pagos, plataformas de nómina, insurtech. Estos son los prospectos reales que el sistema debe poder convertir.
+Zolvo's ICP in Mexico is B2B fintechs: digital lending companies, payment processors, payroll platforms, insurtech. These are the real prospects the system is designed to convert.
 
-### Prerequisito
+### Prerequisite
 
 ```bash
-# Terminal 1 — API corriendo en 0.0.0.0 (necesario para que Docker pueda alcanzarla)
+# Terminal 1 — API running on 0.0.0.0 (required for Docker to reach it)
 PYTHONPATH=src .venv/bin/uvicorn zolvo.api.main:app --host 0.0.0.0 --reload
 ```
 
-> **Nota de red (WSL2 + Docker):** n8n corre en Docker (`172.18.0.2`). En WSL2 el bridge Docker no
-> siempre expone la interfaz `172.18.0.1` al host. Si el webhook retorna error 37ms, el n8n container
-> no alcanza la API. En ese caso usa el Python script para el pipeline y n8n para mostrar el diagrama visual.
+> **Network note (WSL2 + Docker):** n8n runs in Docker (`172.18.0.2`). In WSL2 the Docker bridge
+> does not always expose the `172.18.0.1` interface to the host. If the webhook returns a 37ms error,
+> the n8n container cannot reach the API. Use the Python script for the pipeline and n8n to display
+> the visual workflow diagram.
 
-### Lead ejemplo: Fernanda Garza — VP de Producto @ Konfío
+### Example lead: Fernanda Garza — VP of Product @ Konfío
 
-Konfío es una plataforma mexicana de crédito para PyMEs con miles de solicitudes mensuales — caso de uso real para scoring automatizado.
+Konfío is a Mexican SME credit platform handling thousands of monthly requests — a real use case for automated scoring.
 
 ```bash
-# Paso 1 — Ingresar el lead vía n8n
+# Step 1 — Ingest the lead via n8n
 curl -s -X POST https://n8n.stivenyepes.com/webhook/zolvo-new-lead \
   -H "Content-Type: application/json" \
   -d '{
@@ -91,10 +92,9 @@ curl -s -X POST https://n8n.stivenyepes.com/webhook/zolvo-new-lead \
   }' | python3 -m json.tool
 ```
 
-Guarda los IDs de la respuesta:
+Save the IDs from the response:
 
 ```bash
-# Extraer IDs (requiere jq)
 RESPONSE=$(curl -s -X POST https://n8n.stivenyepes.com/webhook/zolvo-new-lead \
   -H "Content-Type: application/json" \
   -d '{"body": {"tenant_id": "00000000-0000-0000-0000-000000000001", "full_name": "Fernanda Garza", "email": "fernanda.garza@konfio.mx", "company": "Konfío", "role": "VP de Producto", "source": "linkedin", "channel": "linkedin"}}')
@@ -104,7 +104,7 @@ echo "conversation_id: $CONV_ID"
 ```
 
 ```bash
-# Paso 2 — Fernanda responde con interés (meeting_intent)
+# Step 2 — Fernanda replies with interest (meeting_intent)
 curl -s -X POST https://n8n.stivenyepes.com/webhook/zolvo-reply \
   -H "Content-Type: application/json" \
   -d "{
@@ -114,11 +114,11 @@ curl -s -X POST https://n8n.stivenyepes.com/webhook/zolvo-reply \
       \"message\": \"Hola, me llegó tu mensaje. En Konfío manejamos miles de solicitudes de crédito PyME al mes y estamos evaluando cómo mejorar la calificación inicial. ¿Cuándo podemos hablar?\"
     }
   }" | python3 -m json.tool
-# Esperado: intent=meeting_intent, action=send
+# Expected: intent=meeting_intent, action=send
 ```
 
 ```bash
-# Paso 3 — Objeción técnica (frecuente en fintech MX: stack legacy propio)
+# Step 3 — Technical objection (common in MX fintech: in-house legacy stack)
 curl -s -X POST https://n8n.stivenyepes.com/webhook/zolvo-reply \
   -H "Content-Type: application/json" \
   -d "{
@@ -128,11 +128,11 @@ curl -s -X POST https://n8n.stivenyepes.com/webhook/zolvo-reply \
       \"message\": \"El concepto suena bien, pero ya tenemos un modelo de scoring propio con 3 años de datos históricos. ¿Cómo se integraría sin reemplazar lo que ya funciona?\"
     }
   }" | python3 -m json.tool
-# Esperado: intent=complex_technical o objection_timing, action=send o handoff
+# Expected: intent=complex_technical or objection_timing, action=send or handoff
 ```
 
 ```bash
-# Paso 4 — Confirma reunión en CDMX
+# Step 4 — Confirms meeting in CDMX
 curl -s -X POST https://n8n.stivenyepes.com/webhook/zolvo-reply \
   -H "Content-Type: application/json" \
   -d "{
@@ -142,78 +142,78 @@ curl -s -X POST https://n8n.stivenyepes.com/webhook/zolvo-reply \
       \"message\": \"Me convence el enfoque. ¿Pueden venir a nuestras oficinas en Reforma el martes o miércoles? Quiero que lo vea también nuestra CTO.\"
     }
   }" | python3 -m json.tool
-# Esperado: intent=meeting_intent, action=send o escalate (Gate 2 decide)
+# Expected: intent=meeting_intent, action=send or escalate (Gate 2 decides)
 ```
 
-### Otros leads mexicanos para variar el demo
+### Other Mexican leads to vary the demo
 
 ```bash
-# Lead 2 — Kueski (crédito al consumo)
+# Lead 2 — Kueski (consumer lending)
 "full_name": "Rodrigo Méndez", "company": "Kueski", "role": "Director de Operaciones"
 
-# Lead 3 — Clip (procesador de pagos PyME)
+# Lead 3 — Clip (SME payment processor)
 "full_name": "Ana Martínez", "company": "Clip", "role": "Head of Growth"
 
-# Lead 4 — Clara (gestión de gastos corporativos)
+# Lead 4 — Clara (corporate expense management)
 "full_name": "Miguel Ángel Torres", "company": "Clara", "role": "CTO"
 
-# Lead 5 — Conekta (pasarela de pagos)
+# Lead 5 — Conekta (payment gateway)
 "full_name": "Sofía Herrera", "company": "Conekta", "role": "VP de Ventas B2B"
 ```
 
 ---
 
-## Qué añadiría n8n en producción
+## What n8n would add in production
 
-Los workflows actuales son el esqueleto del patrón híbrido. En producción, cada workflow crecería con nodos adicionales:
+The current workflows are the skeleton of the hybrid pattern. In production each workflow would grow with additional nodes:
 
-### Workflow de ingesta (producción)
+### Ingestion workflow (production)
 
 ```
 [LinkedIn Webhook]
         ↓
 [Enrich — LinkedIn API]
         ↓
-[POST /agents/ingest]       ← igual que ahora
+[POST /agents/ingest]       ← same as now
         ↓
 [IF action = send]
-   ↓ Sí                          ↓ No
-[LinkedIn — Send Message]   [Slack — Notificar SDR]
+   ↓ Yes                         ↓ No
+[LinkedIn — Send Message]   [Slack — Notify SDR]
         ↓
-[Wait 2-3 días]
+[Wait 2-3 days]
         ↓
 [Supabase — Mark Sent]
 ```
 
-### Workflow de reply (producción)
+### Reply workflow (production)
 
 ```
 [Gmail / LinkedIn Webhook]
         ↓
-[POST /events/reply]        ← igual que ahora
+[POST /events/reply]        ← same as now
         ↓
-[Switch por action]
+[Switch by action]
    ↓ send          ↓ handoff              ↓ escalate
 [Send Message]  [Slack Alert]          [Slack Alert]
-                [Asignar a SDR]        [Draft listo para revisar]
+                [Assign to SDR]        [Draft ready for review]
         ↓
 [IF intent = meeting_intent]
         ↓
-[Google Calendar — Crear evento]
-[Enviar invitación]
+[Google Calendar — Create event]
+[Send invitation]
 ```
 
-### Por qué estas integraciones no están en el prototipo
+### Why these integrations are not in the prototype
 
-El brief pide demostrar la **arquitectura**, no conectar OAuth de LinkedIn. Integrar canales reales requiere:
-- App de LinkedIn aprobada (proceso de semanas)
-- OAuth de Gmail con Google Workspace
-- Credenciales de Google Calendar
+The brief asks to demonstrate the **architecture**, not to wire up LinkedIn OAuth. Real channel integrations require:
+- An approved LinkedIn app (weeks-long review process)
+- Gmail OAuth with Google Workspace
+- Google Calendar credentials
 
-El prototipo demuestra la arquitectura de agentes. Los workflows de n8n son el blueprint de cómo encajarían los canales en producción.
+The prototype demonstrates the agent architecture. The n8n workflows are the blueprint for how channels would plug in for production.
 
 ---
 
-## Ver ejecuciones en n8n
+## Viewing executions in n8n
 
-En `https://n8n.stivenyepes.com` → sección **Executions** se ven todas las ejecuciones con input recibido, output de cada nodo, tiempo y errores. Esto es lo que mostraría el equipo de ventas para auditar qué mensajes procesó el sistema.
+Go to `https://n8n.stivenyepes.com` → **Executions** section to see all runs with the received input, each node's output, timing, and errors. This is what the sales team would use to audit which messages the system processed.

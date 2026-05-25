@@ -1,104 +1,104 @@
-# CLAUDE.md — Guía operativa para Claude Code
+# CLAUDE.md — Operational guide for Claude Code
 
-> Este archivo es la especificación operativa del proyecto. Léelo completo antes de cualquier acción. Es la fuente de verdad sobre objetivos, restricciones, alcance y convenciones.
-
----
-
-## 1. Contexto del proyecto
-
-Este repositorio implementa el **prototipo del AI Sales & Growth Engine de Zolvo**, propuesta técnica para el reto de Coding Fellowship de Makers Admission 2026-2.
-
-**Eres el desarrollador principal.** Vas a planear y construir el código bajo supervisión del autor (Stiven). El objetivo final del proyecto es demostrar — en un video de 5 minutos — una arquitectura de calidad de ingeniería con un prototipo funcional que cubra el happy path.
-
-**Lectura obligatoria antes de codear:**
-- `docs/arquitectura-zolvo.md` — diseño completo del sistema (C4, ADRs, modelo de datos, máquina de estados). Toda decisión de implementación se justifica contra este documento.
-
-Si encuentras contradicción entre este `CLAUDE.md` y el documento de arquitectura, **detente y pregunta**. No asumas.
+> This file is the operational specification of the project. Read it in full before any action. It is the source of truth for objectives, constraints, scope, and conventions.
 
 ---
 
-## 2. Objetivos del prototipo
+## 1. Project context
 
-**Objetivo del demo (5 min de video):** mostrar el happy path end-to-end con datos reales, demostrando:
+This repository implements the **prototype of Zolvo's AI Sales & Growth Engine**, a technical proposal for the Coding Fellowship challenge at Makers Admission 2026-2.
 
-1. Ingesta de un lead con enrichment automático
-2. Generación de mensaje inicial outbound
-3. Recepción de respuesta del prospect (simulada o real)
-4. Pipeline de dos puertas: Intent Classifier + Confidence Gate
-5. Respuesta multi-turn con memoria dual
-6. Detección de intent de meeting y agendamiento
+**You are the primary developer.** You will plan and build the code under the author's supervision (Stiven). The final goal of the project is to demonstrate — in a 5-minute video — a production-quality architecture with a functional prototype covering the happy path.
 
-**Lo que NO es el objetivo:** un producto desplegado en producción. Esto es un prototipo demostrativo con énfasis en calidad de diseño, no en cobertura de features.
+**Required reading before coding:**
+- `docs/arquitectura-zolvo.md` — complete system design (C4, ADRs, data model, state machine). Every implementation decision is justified against this document.
+
+If you find a contradiction between this `CLAUDE.md` and the architecture document, **stop and ask**. Do not assume.
 
 ---
 
-## 3. Restricciones reales
+## 2. Prototype objectives
 
-| Restricción | Valor |
+**Demo goal (5-minute video):** show the end-to-end happy path with real data, demonstrating:
+
+1. Lead ingestion with automatic enrichment
+2. Initial outbound message generation
+3. Prospect reply received (simulated or real)
+4. Two-gate pipeline: Intent Classifier + Confidence Gate
+5. Multi-turn reply with dual memory
+6. Meeting intent detection and scheduling
+
+**What is NOT the objective:** a product deployed in production. This is a demonstrative prototype with emphasis on design quality, not feature coverage.
+
+---
+
+## 3. Real constraints
+
+| Constraint | Value |
 |---|---|
-| Deadline absoluto | 48h desde 23 may 2026, 17:58 (hora Colombia) |
-| Tiempo de desarrollo efectivo | ~30h (resto para guion, grabación, edición, buffer) |
-| Mercado del demo | México (ICP: fintech B2B) |
-| Idioma de prompts/UX | Español |
-| Costo de APIs | Mínimo necesario. Preferir modelos baratos donde se pueda. |
+| Absolute deadline | 48h from May 23, 2026, 17:58 (Colombia time) |
+| Effective development time | ~30h (rest for script, recording, editing, buffer) |
+| Demo market | Mexico (ICP: B2B fintech) |
+| Prompt/UX language | Spanish |
+| API cost | Minimum necessary. Prefer cheap models where possible. |
 
-**Si el tiempo se acaba, el prototipo NO debe estar incompleto en lo crítico.** Mejor entregar menos features bien hechas que muchas a medias.
+**If time runs out, the prototype must NOT be incomplete on the critical path.** Better to deliver fewer features done well than many done halfway.
 
 ---
 
-## 4. Stack tecnológico
+## 4. Technology stack
 
 ### Backend (Agent Services API)
-- **Python 3.11+** con tipado estricto (mypy si hay tiempo)
-- **FastAPI** para HTTP
-- **Pydantic v2** para schemas y validación
-- **SQLAlchemy 2.x** + **asyncpg** para Postgres
-- **pgvector** vía `pgvector-python`
-- **httpx** para llamadas HTTP async
-- **structlog** o logging estándar bien configurado
+- **Python 3.11+** with strict typing (mypy if time allows)
+- **FastAPI** for HTTP
+- **Pydantic v2** for schemas and validation
+- **SQLAlchemy 2.x** + **asyncpg** for Postgres
+- **pgvector** via `pgvector-python`
+- **httpx** for async HTTP calls
+- **structlog** or well-configured standard logging
 
-### Datos
+### Data
 - **Supabase** (Postgres + pgvector + Realtime + RLS)
-- Migrations versionadas (Supabase CLI o Alembic)
+- Versioned migrations (Supabase CLI or Alembic)
 
-### Orquestación
-- **n8n** — disponible vía MCP server. **Usa el MCP de n8n** para crear y actualizar workflows. No edites JSON de n8n a mano.
+### Orchestration
+- **n8n** — available via MCP server. **Use the n8n MCP** to create and update workflows. Do not edit n8n JSON manually.
 
-### LLM providers (Strategy pattern obligatorio)
-- **OpenAI** (gpt-4o-mini para barato, gpt-4o para premium)
-- **Anthropic** (claude-haiku-4-5 para barato, claude-sonnet-4-5 para premium)
-- **Ollama** (local, opcional — útil para PII sensible)
-- **OpenRouter** (acceso a Llama, Mistral, etc.)
+### LLM providers (Strategy pattern mandatory)
+- **OpenAI** (gpt-4o-mini for cheap, gpt-4o for premium)
+- **Anthropic** (claude-haiku-4-5 for cheap, claude-sonnet-4-5 for premium)
+- **Ollama** (local, optional — useful for PII-sensitive tasks)
+- **OpenRouter** (access to Llama, Mistral, etc.)
 
-**El código nunca debe importar SDKs de proveedores directamente fuera del módulo `llm/`.** Todo pasa por `LLMGateway`.
+**Code must never import provider SDKs directly outside the `llm/` module.** Everything goes through `LLMGateway`.
 
 ### Tooling
-- **uv** o **poetry** para gestión de dependencias
-- **ruff** para linting
-- **pytest** para tests
-- **Claude Code** para desarrollo (tú)
+- **uv** or **poetry** for dependency management
+- **ruff** for linting
+- **pytest** for tests
+- **Claude Code** for development (you)
 
 ---
 
-## 5. Estructura del proyecto
+## 5. Project structure
 
-Monorepo con paquetes. Estructura propuesta:
+Monorepo with packages. Proposed structure:
 
 ```
 zolvo-prototype/
-├── CLAUDE.md                       # este archivo
-├── README.md                       # quickstart y demo guide
+├── CLAUDE.md                       # this file
+├── README.md                       # quickstart and demo guide
 ├── docs/
-│   ├── arquitectura-zolvo.md       # diseño completo
-│   └── diagrams/                   # PlantUML renderizado (PNG/SVG)
+│   ├── arquitectura-zolvo.md       # complete design
+│   └── diagrams/                   # PlantUML rendered (PNG/SVG)
 ├── pyproject.toml
 ├── .env.example
 ├── .gitignore
 ├── supabase/
-│   ├── migrations/                 # SQL versionado
-│   └── seed.sql                    # datos de prueba (ICP mexicano)
+│   ├── migrations/                 # versioned SQL
+│   └── seed.sql                    # test data (Mexican ICP)
 ├── n8n/
-│   └── workflows/                  # exports JSON de los flows creados vía MCP
+│   └── workflows/                  # JSON exports of flows created via MCP
 ├── src/
 │   └── zolvo/
 │       ├── __init__.py
@@ -106,30 +106,30 @@ zolvo-prototype/
 │       │   ├── main.py
 │       │   ├── routes/
 │       │   └── deps.py
-│       ├── agents/                 # cada agente como Strategy
-│       │   ├── base.py             # AgentBase abstracto
+│       ├── agents/                 # each agent as Strategy
+│       │   ├── base.py             # abstract AgentBase
 │       │   ├── researcher.py
 │       │   ├── copywriter.py
 │       │   ├── conversationalist.py
 │       │   ├── scheduler.py
 │       │   └── evaluator.py        # Confidence Gate
 │       ├── intent/
-│       │   └── classifier.py       # Intent Classifier (Puerta 1)
+│       │   └── classifier.py       # Intent Classifier (Gate 1)
 │       ├── orchestrator/
-│       │   └── orchestrator.py     # decide a quién invocar
-│       ├── llm/                    # Strategy pattern para proveedores
+│       │   └── orchestrator.py     # decides which agent to invoke
+│       ├── llm/                    # Strategy pattern for providers
 │       │   ├── base.py             # LLMProvider interface
 │       │   ├── openai_provider.py
 │       │   ├── anthropic_provider.py
 │       │   ├── ollama_provider.py
 │       │   ├── openrouter_provider.py
-│       │   ├── gateway.py          # LLMGateway con routing por costo
-│       │   └── prompts/            # prompts versionados, uno por agente
+│       │   ├── gateway.py          # LLMGateway with cost-based routing
+│       │   └── prompts/            # versioned prompts, one per agent
 │       ├── memory/
-│       │   └── service.py          # Memoria dual: textual + semántica
-│       ├── channels/               # adapters para canales
+│       │   └── service.py          # Dual memory: textual + semantic
+│       ├── channels/               # channel adapters
 │       │   ├── base.py
-│       │   ├── linkedin_mock.py    # mock para el prototipo
+│       │   ├── linkedin_mock.py    # mock for the prototype
 │       │   └── email_mock.py
 │       ├── repositories/           # Repository pattern
 │       │   ├── base.py
@@ -148,267 +148,267 @@ zolvo-prototype/
 └── tests/
     ├── unit/
     ├── integration/
-    └── fixtures/                   # dataset sintético ICP mexicano
+    └── fixtures/                   # synthetic Mexican ICP dataset
 ```
 
-**No crees módulos que no estén en esta estructura sin pedir permiso.** Si necesitas uno nuevo, pregunta.
+**Do not create modules that are not in this structure without asking.** If you need a new one, ask first.
 
 ---
 
-## 6. Convenciones de código
+## 6. Code conventions
 
-### Principios (aplicar con criterio, no dogmáticamente)
+### Principles (apply with judgment, not dogmatically)
 
-- **SOLID donde aporta valor.** Strategy pattern para `LLMProvider`, `AgentBase`, `ChannelAdapter` y `Repository`. **No abstraigas lo que solo tiene una implementación y no la va a tener pronto.**
-- **Composition over inheritance.** Agentes reciben dependencias por constructor.
-- **Dependency injection vía FastAPI.** Sin frameworks DI externos.
-- **Inmutabilidad por default.** Modelos Pydantic con `frozen=True` cuando aplique.
-- **Async/await en todo el path I/O.** Nada de `requests` síncrono.
+- **SOLID where it adds value.** Strategy pattern for `LLMProvider`, `AgentBase`, `ChannelAdapter`, and `Repository`. **Do not abstract what only has one implementation and won't have more soon.**
+- **Composition over inheritance.** Agents receive dependencies via constructor.
+- **Dependency injection via FastAPI.** No external DI frameworks.
+- **Immutability by default.** Pydantic models with `frozen=True` where applicable.
+- **Async/await across the entire I/O path.** No synchronous `requests`.
 
-### Reglas duras
+### Hard rules
 
-- Tipado obligatorio en signatures públicas. `from __future__ import annotations` en todos los módulos.
-- Docstrings cortos en clases públicas y funciones no triviales. Idioma: inglés (estándar del ecosistema Python).
-- Logs estructurados con `extra={...}`, nunca con f-strings.
-- Errores de dominio como excepciones específicas (`LLMProviderError`, `ConfidenceTooLowError`, `IntentClassificationError`). Nunca `except Exception` salvo en el borde HTTP.
-- Sin código muerto, sin TODOs sin issue/owner asociado, sin comentarios `# this is hacky`.
-- **Sin secretos en código.** Todo vía `.env` y `Settings`.
+- Typing mandatory on public signatures. `from __future__ import annotations` in all modules.
+- Short docstrings on public classes and non-trivial functions. Language: English (Python ecosystem standard).
+- Structured logs with `extra={...}`, never with f-strings.
+- Domain errors as specific exceptions (`LLMProviderError`, `ConfidenceTooLowError`, `IntentClassificationError`). Never `except Exception` except at the HTTP boundary.
+- No dead code, no TODOs without an associated issue/owner, no `# this is hacky` comments.
+- **No secrets in code.** Everything via `.env` and `Settings`.
 
 ### Tests
 
-- **Unit tests obligatorios** para: `LLMGateway` (routing), `IntentClassifier`, `Evaluator`, `MemoryService`, `Orchestrator`.
-- **Integration test obligatorio** para el happy path completo (con mocks de LLM providers).
-- **NO escribir tests para Pydantic models simples ni para wrappers triviales.** Tiempo es escaso, prioriza tests con señal.
-- Mocks de LLM providers vía interfaz `LLMProvider`. Un `FakeLLMProvider` con respuestas predefinidas debe existir desde temprano.
+- **Unit tests mandatory** for: `LLMGateway` (routing), `IntentClassifier`, `Evaluator`, `MemoryService`, `Orchestrator`.
+- **Integration test mandatory** for the complete happy path (with LLM provider mocks).
+- **DO NOT write tests for simple Pydantic models or trivial wrappers.** Time is scarce — prioritize tests with signal.
+- LLM provider mocks via the `LLMProvider` interface. A `FakeLLMProvider` with predefined responses must exist from early on.
 
 ---
 
-## 7. Workflow de desarrollo
+## 7. Development workflow
 
-### Regla número 1: planea antes de actuar
+### Rule 1: plan before acting
 
-**Para cada hito de la sección 8, sigue este protocolo:**
+**For each milestone in section 8, follow this protocol:**
 
-1. Lee el hito y el documento de arquitectura relevante.
-2. **Antes de escribir código**, produce un plan corto en este formato:
+1. Read the milestone and the relevant architecture document.
+2. **Before writing code**, produce a short plan in this format:
 
    ```
-   ## Plan: [nombre del hito]
+   ## Plan: [milestone name]
 
-   ### Archivos a crear/modificar
-   - path/to/file.py — qué hace
+   ### Files to create/modify
+   - path/to/file.py — what it does
 
-   ### Decisiones técnicas
-   - decisión 1 y por qué
-   - decisión 2 y por qué
+   ### Technical decisions
+   - decision 1 and why
+   - decision 2 and why
 
-   ### Riesgos / preguntas
-   - cosa que no está clara
-   - decisión que requiere validación
+   ### Risks / questions
+   - something that is not clear
+   - decision that requires validation
 
    ### Tests
-   - qué se va a testear
+   - what will be tested
 
-   ### Tiempo estimado: X minutos
+   ### Estimated time: X minutes
    ```
 
-3. Espera aprobación del autor antes de codear.
-4. Implementa.
-5. Corre tests.
-6. Reporta hito completado con: archivos creados, tests pasando, próximo paso sugerido.
+3. Wait for the author's approval before coding.
+4. Implement.
+5. Run tests.
+6. Report milestone completed with: files created, tests passing, validation command, suggested next milestone.
 
-**Si el plan está claro y es obviamente correcto, dilo y procede sin esperar.** No introduzcas fricción innecesaria.
+**If the plan is clear and obviously correct, say so and proceed without waiting.** Do not introduce unnecessary friction.
 
-### Regla número 2: commits pequeños y descriptivos
+### Rule 2: small, descriptive commits
 
-- Un commit por unidad funcional cerrada (`feat: add LLMGateway with OpenAI provider`, no `wip`).
+- One commit per closed functional unit (`feat: add LLMGateway with OpenAI provider`, not `wip`).
 - Conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, `chore:`.
-- Sin commits con código roto en `main`.
+- No commits with broken code on `main`.
 
-### Regla número 3: cuando dudes, pregunta
+### Rule 3: when in doubt, ask
 
-- Mejor 30 segundos de pregunta que 30 minutos de código equivocado.
-- Si encuentras una ambigüedad en la arquitectura, **detente y pregunta** antes de improvisar.
+- 30 seconds of asking beats 30 minutes of wrong code.
+- If you find an ambiguity in the architecture, **stop and ask** before improvising.
 
 ---
 
-## 8. Hitos de entrega
+## 8. Delivery milestones
 
-Cada hito es **demoable**: al terminar, debe haber algo concreto que se pueda mostrar.
+Each milestone is **demonstrable**: when done, there must be something concrete to show.
 
-### Hito 0 — Setup (estimado 2h)
-- Estructura de carpetas
-- `pyproject.toml` con dependencias
-- `.env.example` con todas las variables
-- Supabase: proyecto creado, migrations base, RLS habilitado
-- README con quickstart
-- CI mínimo: ruff + pytest en GitHub Actions
+### Milestone 0 — Setup (estimated 2h)
+- Folder structure
+- `pyproject.toml` with dependencies
+- `.env.example` with all variables
+- Supabase: project created, base migrations, RLS enabled
+- README with quickstart
+- Minimal CI: ruff + pytest in GitHub Actions
 
-**DoD:** `uvicorn zolvo.api.main:app` levanta sin errores; `pytest` corre sin tests pero sin fallos.
+**DoD:** `uvicorn zolvo.api.main:app` starts without errors; `pytest` runs without tests but without failures.
 
-### Hito 1 — LLM Gateway con Strategy pattern (estimado 3h)
-- Interfaz `LLMProvider` abstracta
-- Implementaciones: `OpenAIProvider`, `AnthropicProvider`, `FakeLLMProvider` (para tests)
-- `LLMGateway` con routing por tipo de tarea (`classification` → barato; `generation_critical` → premium)
-- Registro automático de `agent_runs` (costo, latencia, tokens)
-- Tests unitarios: routing decide correctamente; provider llamado con params correctos; `agent_runs` se persiste
+### Milestone 1 — LLM Gateway with Strategy pattern (estimated 3h)
+- Abstract `LLMProvider` interface
+- Implementations: `OpenAIProvider`, `AnthropicProvider`, `FakeLLMProvider` (for tests)
+- `LLMGateway` with task-type routing (`classification` → cheap; `generation_critical` → premium)
+- Automatic `agent_runs` registration (cost, latency, tokens)
+- Unit tests: routing decides correctly; provider called with correct params; `agent_runs` persisted
 
-**DoD:** `gateway.complete(task_type="classification", prompt="...")` funciona con al menos 2 proveedores reales.
+**DoD:** `gateway.complete(task_type="classification", prompt="...")` works with at least 2 real providers.
 
-### Hito 2 — Modelo de datos y repositorios (estimado 3h)
-- Migrations en `supabase/migrations/` para todas las tablas del modelo (sección 9 de arquitectura)
-- RLS policies por `tenant_id`
-- Repositorios para `leads`, `conversations`, `messages`, `agent_runs`
-- Test de integración: insertar lead, leer lead, RLS bloquea cross-tenant
+### Milestone 2 — Data model and repositories (estimated 3h)
+- Migrations in `supabase/migrations/` for all model tables (architecture section 9)
+- RLS policies by `tenant_id`
+- Repositories for `leads`, `conversations`, `messages`, `agent_runs`
+- Integration test: insert lead, read lead, RLS blocks cross-tenant
 
-**DoD:** `LeadRepository.create()` y `LeadRepository.get_by_id()` funcionan contra Supabase real.
+**DoD:** `LeadRepository.create()` and `LeadRepository.get_by_id()` work against real Supabase.
 
-### Hito 3 — Researcher Agent (estimado 2h)
-- `Researcher` implementa `AgentBase`
-- Genera enrichment + embedding del lead
-- Persiste en `lead_embeddings`
-- Registra `agent_runs`
+### Milestone 3 — Researcher Agent (estimated 2h)
+- `Researcher` implements `AgentBase`
+- Generates lead enrichment + embedding
+- Persists to `lead_embeddings`
+- Registers `agent_runs`
 
-**DoD:** `researcher.run(lead_id)` enriquece un lead de prueba y guarda el embedding.
+**DoD:** `researcher.run(lead_id)` enriches a test lead and saves the embedding.
 
-### Hito 4 — Copywriter Agent (estimado 2h)
-- `Copywriter` genera mensaje inicial outbound
-- Recupera ejemplos del ICP vía RAG (placeholder si no hay ICP data aún)
-- Prompts en español, tono profesional pero cercano (ICP México)
-- Registra `agent_runs`
+### Milestone 4 — Copywriter Agent (estimated 2h)
+- `Copywriter` generates initial outbound message
+- Retrieves ICP examples via RAG (placeholder if no ICP data yet)
+- Prompts in Spanish, professional but approachable tone (Mexico ICP)
+- Registers `agent_runs`
 
-**DoD:** `copywriter.run(lead_id)` produce un mensaje plausible para un lead de fintech mexicana.
+**DoD:** `copywriter.run(lead_id)` produces a plausible message for a Mexican fintech lead.
 
-### Hito 5 — Intent Classifier (Puerta 1) (estimado 2h)
-- `IntentClassifier` clasifica en las 9 categorías del ADR-04
-- Usa modelo barato vía `LLMGateway` con `task_type="classification"`
-- Retorna `IntentResult(intent: str, should_handoff: bool, reason: str)`
-- Tests unitarios con casos de cada categoría usando `FakeLLMProvider`
+### Milestone 5 — Intent Classifier (Gate 1) (estimated 2h)
+- `IntentClassifier` classifies into the 9 categories from ADR-04
+- Uses cheap model via `LLMGateway` with `task_type="classification"`
+- Returns `IntentResult(intent: str, should_handoff: bool, reason: str)`
+- Unit tests with cases from each category using `FakeLLMProvider`
 
-**DoD:** dado un mensaje de objeción de precio, retorna `objection_price` y `should_handoff=False`. Dado un mensaje de queja, retorna `complaint` y `should_handoff=True`.
+**DoD:** given a price objection message, returns `objection_price` and `should_handoff=False`. Given a complaint message, returns `complaint` and `should_handoff=True`.
 
-### Hito 6 — Memory Service (memoria dual) (estimado 3h)
-- `MemoryService.get_short_term(conversation_id, n=15)` → últimos N mensajes textuales
-- `MemoryService.get_long_term(query_embedding, top_k=5)` → similarity search en `conversation_summaries_embeddings` y `lead_embeddings`
-- `MemoryService.summarize_and_index(conversation_id)` → genera resumen al cerrar conversación
-- Tests unitarios con dataset sintético
+### Milestone 6 — Memory Service (dual memory) (estimated 3h)
+- `MemoryService.get_short_term(conversation_id, n=15)` → last N textual messages
+- `MemoryService.get_long_term(query_embedding, top_k=5)` → similarity search in `conversation_summaries_embeddings` and `lead_embeddings`
+- `MemoryService.summarize_and_index(conversation_id)` → generates summary when closing a conversation
+- Unit tests with synthetic dataset
 
-**DoD:** ambos métodos funcionan; el agente puede consultarlos.
+**DoD:** both methods work; the agent can query them.
 
-### Hito 7 — Conversationalist Agent (estimado 3h)
-- `Conversationalist` mantiene threads multi-turn
-- Consume memoria dual vía `MemoryService`
-- Recibe el `intent` ya clasificado y ajusta el prompt según categoría
-- Registra `agent_runs`
+### Milestone 7 — Conversationalist Agent (estimated 3h)
+- `Conversationalist` maintains multi-turn threads
+- Consumes dual memory via `MemoryService`
+- Receives the already-classified `intent` and adjusts prompt by category
+- Registers `agent_runs`
 
-**DoD:** mantiene un thread de 3-4 turnos con coherencia y respondiendo según el intent detectado.
+**DoD:** maintains a 3-4 turn thread with coherence and responds according to the detected intent.
 
-### Hito 8 — Evaluator / Confidence Gate (Puerta 2) (estimado 2h)
+### Milestone 8 — Evaluator / Confidence Gate (Gate 2) (estimated 2h)
 - `Evaluator.evaluate(draft, context)` → `EvaluationResult(score, breakdown, should_send, reason)`
-- Score en 3 ejes: naturalidad, relevancia, riesgo
-- Umbral configurable vía settings
-- Tests con drafts buenos y malos usando `FakeLLMProvider`
+- Score on 3 axes: naturalness, relevance, risk
+- Configurable threshold via settings
+- Tests with good and bad drafts using `FakeLLMProvider`
 
-**DoD:** drafts obviamente malos son rechazados; drafts buenos pasan.
+**DoD:** obviously bad drafts are rejected; good drafts pass.
 
-### Hito 9 — Orchestrator (estimado 2h)
-- `Orchestrator` coordina el flujo:
-  1. Recibe evento `reply.received`
-  2. Carga conversación y memoria
-  3. Llama a `IntentClassifier`
-  4. Si handoff → notifica Slack (puede ser mock); si no → llama al agente apropiado
-  5. Llama a `Evaluator`
-  6. Si aprobado → persiste y envía vía `ChannelAdapter`; si no → escala
-- Test de integración del happy path completo
+### Milestone 9 — Orchestrator (estimated 2h)
+- `Orchestrator` coordinates the flow:
+  1. Receives `reply.received` event
+  2. Loads conversation and memory
+  3. Calls `IntentClassifier`
+  4. If handoff → notifies Slack (can be mock); if not → calls the appropriate agent
+  5. Calls `Evaluator`
+  6. If approved → persists and sends via `ChannelAdapter`; if not → escalates
+- Integration test of the complete happy path
 
-**DoD:** un evento `reply.received` recorre todo el pipeline sin errores con datos sintéticos.
+**DoD:** a `reply.received` event traverses the entire pipeline without errors with synthetic data.
 
-### Hito 10 — n8n workflow vía MCP (estimado 3h)
-- Crear workflow en n8n usando el MCP:
-  - Trigger: webhook para nuevo lead
-  - HTTP node llama a `/agents/ingest` de la API
-  - Trigger: webhook para reply entrante (simulando LinkedIn)
-  - HTTP node llama a `/events/reply` de la API
-- Export del workflow a `n8n/workflows/`
-- README explica cómo importar y correr
+### Milestone 10 — n8n workflow via MCP (estimated 3h)
+- Create workflow in n8n using the MCP:
+  - Trigger: webhook for new lead
+  - HTTP node calls `/agents/ingest` on the API
+  - Trigger: webhook for incoming reply (simulating LinkedIn)
+  - HTTP node calls `/events/reply` on the API
+- Workflow exported to `n8n/workflows/`
+- README explains how to import and run
 
-**DoD:** disparar un webhook desde curl recorre todo el flujo y deja registro en Supabase.
+**DoD:** triggering a webhook from curl traverses the full flow and leaves a record in Supabase.
 
-### Hito 11 — Dataset sintético y demo end-to-end (estimado 2h)
-- Crear 5-10 leads realistas de fintech B2B mexicana
-- Crear secuencia de respuestas simuladas que cubran: interés, objeción, intent de meeting
-- Script `demo/run_happy_path.py` que dispara el flujo completo
-- Validar que las respuestas generadas son coherentes y "indistinguibles"
+### Milestone 11 — Synthetic dataset and end-to-end demo (estimated 2h)
+- Create 5-10 realistic Mexican B2B fintech leads
+- Create sequence of simulated replies covering: interest, objection, meeting intent
+- Script `demo/run_happy_path.py` that triggers the full flow
+- Validate that generated responses are coherent and "indistinguishable"
 
-**DoD:** corres `python demo/run_happy_path.py` y todo el pipeline se ejecuta visiblemente; la base queda en estado limpio para grabar el video.
+**DoD:** run `python demo/run_happy_path.py` and the full pipeline runs visibly; the database is in clean state for recording the video.
 
-### Hito 12 — Polish para el video (estimado 2h, opcional según tiempo)
-- Logs legibles para grabar en pantalla
-- Pequeño dashboard CLI o queries SQL preparadas para mostrar métricas (`cost_per_message`, `confidence_score_avg`, `intent_distribution`)
-- README final con instrucciones reproducibles
+### Milestone 12 — Video polish (estimated 2h, optional depending on time)
+- Readable logs for screen recording
+- Small CLI dashboard or prepared SQL queries to show metrics (`cost_per_message`, `confidence_score_avg`, `intent_distribution`)
+- Final README with reproducible instructions
 
-**DoD:** el repo se ve profesional al primer scroll.
-
----
-
-## 9. Acceso a herramientas (MCP)
-
-**Tienes MCP a n8n disponible.** Úsalo para:
-- Crear workflows (en lugar de editar JSON manualmente)
-- Listar workflows existentes
-- Disparar webhooks de prueba
-- Exportar workflows a JSON para versionarlos en `n8n/workflows/`
-
-**Si necesitas información de Supabase, Anthropic API u otra herramienta,** dilo explícitamente. No asumas que tienes acceso a algo no listado.
+**DoD:** the repo looks professional on first scroll.
 
 ---
 
-## 10. Anti-patrones a evitar
+## 9. Tool access (MCP)
 
-Estos errores son recurrentes en proyectos rápidos. Evítalos activamente.
+**You have MCP access to n8n.** Use it to:
+- Create workflows (instead of editing JSON manually)
+- List existing workflows
+- Trigger test webhooks
+- Export workflows to JSON for versioning in `n8n/workflows/`
 
-- **Abstraer en exceso.** No crees `BaseAbstractFactoryStrategy` para algo que solo tiene una implementación.
-- **Tests con mocks anidados.** Si necesitas 4 mocks para un test, el diseño está mal.
-- **Hardcodear modelos o prompts.** Modelos van por config; prompts viven en `llm/prompts/` versionados.
-- **Logs vacíos o ruidosos.** Loguea decisiones del sistema (qué intent se detectó, qué modelo eligió el router, qué score dio el evaluator). No loguees "function called" en cada función.
-- **Try/except con `pass` o `print(e)`.** Errores se propagan o se manejan con criterio.
-- **Funciones largas.** Si pasa de 50 líneas, hay un problema de cohesión.
-- **Acoplarse al SDK de un LLM en lógica de negocio.** Todo pasa por `LLMGateway`.
-- **Olvidar `tenant_id`.** Todas las queries filtran por tenant. RLS es el último guardián, no el primero.
-- **"Lo arreglo después".** No queda tiempo de después. O se arregla ya, o se documenta como deuda explícita.
+**If you need information from Supabase, Anthropic API, or another tool,** say so explicitly. Do not assume you have access to something not listed.
 
 ---
 
-## 11. Definition of Done global
+## 10. Anti-patterns to avoid
 
-El prototipo está terminado cuando:
+These mistakes are recurring in fast projects. Avoid them actively.
 
-- [ ] Hitos 0-11 completados
-- [ ] `pytest` pasa sin fallos
-- [ ] `ruff check .` sin errores
-- [ ] Demo end-to-end corre sin intervención manual
-- [ ] README en raíz permite a alguien externo clonar, instalar y correr en menos de 10 minutos
-- [ ] Métricas básicas se ven al final del happy path
-- [ ] El código refleja las decisiones del documento de arquitectura
-
-El video se graba **solo después** de esto. No antes.
-
----
-
-## 12. Comunicación con el autor
-
-- **Idioma:** español por default. Inglés si es jerga técnica estándar (commits, docstrings).
-- **Tono:** directo, sin floritura. Reportes cortos.
-- **Cuando termines un hito:** mensaje corto con: archivos creados, tests pasando, comando para validar, próximo hito propuesto.
-- **Cuando dudes:** pregunta antes de improvisar.
-- **Cuando encuentres deuda:** documéntala explícita en código (`# DEBT: razón. ver issue X.`) y reporta.
+- **Over-abstraction.** Do not create `BaseAbstractFactoryStrategy` for something with only one implementation.
+- **Tests with nested mocks.** If you need 4 mocks for a test, the design is wrong.
+- **Hardcoding models or prompts.** Models go through config; prompts live versioned in `llm/prompts/`.
+- **Empty or noisy logs.** Log system decisions (which intent was detected, which model the router chose, which score the evaluator gave). Do not log "function called" for every function.
+- **Try/except with `pass` or `print(e)`.** Errors are propagated or handled with judgment.
+- **Long functions.** If it goes past 50 lines, there is a cohesion problem.
+- **Coupling to an LLM SDK in business logic.** Everything goes through `LLMGateway`.
+- **Forgetting `tenant_id`.** All queries filter by tenant. RLS is the last guardian, not the first.
+- **"I'll fix it later."** There is no later. Either fix it now, or document it as explicit debt.
 
 ---
 
-## 13. Referencias rápidas
+## 11. Global Definition of Done
 
-- Documento de arquitectura: `docs/arquitectura-zolvo.md`
-- Brief original del reto: `docs/zolvo-challenge.pdf` (si está subido)
+The prototype is done when:
+
+- [ ] Milestones 0-11 completed
+- [ ] `pytest` passes without failures
+- [ ] `ruff check .` without errors
+- [ ] End-to-end demo runs without manual intervention
+- [ ] Root README allows an external person to clone, install, and run in under 10 minutes
+- [ ] Basic metrics are visible at the end of the happy path
+- [ ] The code reflects the decisions in the architecture document
+
+The video is recorded **only after** this. Not before.
+
+---
+
+## 12. Communication with the author
+
+- **Language:** Spanish by default. English for standard technical jargon (commits, docstrings).
+- **Tone:** direct, no fluff. Short reports.
+- **When you finish a milestone:** short message with: files created, tests passing, validation command, suggested next milestone.
+- **When in doubt:** ask before improvising.
+- **When you find debt:** document it explicitly in code (`# DEBT: reason. see issue X.`) and report it.
+
+---
+
+## 13. Quick references
+
+- Architecture document: `docs/arquitectura-zolvo.md`
+- Original challenge brief: `docs/zolvo-challenge.pdf` (if uploaded)
 - Stack docs:
   - Supabase: https://supabase.com/docs
   - pgvector: https://github.com/pgvector/pgvector
@@ -417,13 +417,13 @@ El video se graba **solo después** de esto. No antes.
 
 ---
 
-## 14. Primera acción esperada
+## 14. Expected first action
 
-Cuando empiece la sesión de desarrollo, tu primera acción es:
+When a development session starts, your first action is:
 
-1. Leer `CLAUDE.md` (este archivo) completo
-2. Leer `docs/arquitectura-zolvo.md` completo
-3. Producir un **plan de ataque para Hito 0** según el formato de la sección 7
-4. Esperar aprobación
+1. Read `CLAUDE.md` (this file) in full
+2. Read `docs/arquitectura-zolvo.md` in full
+3. Produce an **attack plan for Milestone 0** following the format in section 7
+4. Wait for approval
 
-No empieces a crear archivos antes de eso.
+Do not start creating files before that.

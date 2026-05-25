@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zolvo — Operator Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+            background: #0F172A;
+            color: #E2E8F0;
+            min-height: 100vh;
+            padding: 32px;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #1E293B;
+        }
+        h1 {
+            font-size: 22px;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+        h1 .accent { color: #60A5FA; }
+        .tenant-info {
+            font-size: 13px;
+            color: #64748B;
+            font-family: ui-monospace, monospace;
+        }
+        .pulse {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10B981;
+            margin-right: 8px;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+        .kpi-card {
+            background: #1E293B;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #334155;
+        }
+        .kpi-label {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #94A3B8;
+            margin-bottom: 8px;
+        }
+        .kpi-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #F1F5F9;
+            letter-spacing: -0.02em;
+        }
+        .kpi-value.cost { color: #34D399; }
+        .kpi-value.alert { color: #FBBF24; }
+        .charts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+        .chart-card {
+            background: #1E293B;
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid #334155;
+        }
+        .chart-title {
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #94A3B8;
+            margin-bottom: 16px;
+            font-weight: 500;
+        }
+        canvas { max-height: 280px; }
+        footer {
+            margin-top: 24px;
+            padding-top: 16px;
+            border-top: 1px solid #1E293B;
+            font-size: 12px;
+            color: #64748B;
+            text-align: center;
+            font-family: ui-monospace, monospace;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Zolvo<span class="accent">.</span> Operator Dashboard</h1>
+        <div class="tenant-info">
+            <span class="pulse"></span>
+            <span id="tenant-display">live · auto-refresh 5s</span>
+        </div>
+    </header>
+
+    <section class="grid">
+        <div class="kpi-card">
+            <div class="kpi-label">Leads in pipeline</div>
+            <div class="kpi-value" id="kpi-leads">—</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">Conversations</div>
+            <div class="kpi-value" id="kpi-conversations">—</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">Pending escalations</div>
+            <div class="kpi-value alert" id="kpi-escalations">—</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">Total cost (USD)</div>
+            <div class="kpi-value cost" id="kpi-cost">—</div>
+        </div>
+    </section>
+
+    <section class="charts">
+        <div class="chart-card">
+            <div class="chart-title">Pipeline state breakdown</div>
+            <canvas id="chart-status"></canvas>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Cost by agent (USD)</div>
+            <canvas id="chart-cost"></canvas>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Intent distribution</div>
+            <canvas id="chart-intent"></canvas>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Messages — inbound vs outbound</div>
+            <canvas id="chart-messages"></canvas>
+        </div>
+    </section>
+
+    <footer>
+        <span id="last-update">Loading dashboard…</span> · <a href="/docs" style="color:#64748B;">API Docs</a>
+    </footer>
+
+    <script>
+        const TENANT_ID = new URLSearchParams(window.location.search).get('tenant_id')
+            || '00000000-0000-0000-0000-000000000001';
+        document.getElementById('tenant-display').textContent =
+            'tenant ' + TENANT_ID.slice(0, 8) + '… · auto-refresh 5s';
+
+        const PALETTE = ['#60A5FA', '#34D399', '#FBBF24', '#F87171', '#A78BFA', '#22D3EE', '#FB923C', '#F472B6'];
+        const charts = {};
+
+        Chart.defaults.color = '#94A3B8';
+        Chart.defaults.borderColor = '#334155';
+        Chart.defaults.font.family = '-apple-system, BlinkMacSystemFont, Inter, sans-serif';
+
+        function makeDoughnut(ctx, labels, values) {
+            return new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: PALETTE,
+                        borderWidth: 2,
+                        borderColor: '#1E293B',
+                    }],
+                },
+                options: {
+                    plugins: { legend: { position: 'right', labels: { boxWidth: 12, padding: 12 } } },
+                    cutout: '60%',
+                },
+            });
+        }
+
+        function makeBar(ctx, labels, values, color) {
+            return new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: values,
+                        backgroundColor: color || '#60A5FA',
+                        borderRadius: 6,
+                    }],
+                },
+                options: {
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { grid: { display: false } },
+                        y: { grid: { color: '#334155' }, beginAtZero: true },
+                    },
+                },
+            });
+        }
+
+        function updateOrCreate(name, factory, labels, values) {
+            if (charts[name]) {
+                charts[name].data.labels = labels;
+                charts[name].data.datasets[0].data = values;
+                charts[name].update('none');
+            } else {
+                charts[name] = factory(document.getElementById('chart-' + name).getContext('2d'), labels, values);
+            }
+        }
+
+        async function refresh() {
+            try {
+                const res = await fetch('/operator/dashboard?tenant_id=' + TENANT_ID);
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                const data = await res.json();
+
+                document.getElementById('kpi-leads').textContent = data.pipeline.total_leads;
+                document.getElementById('kpi-conversations').textContent = data.pipeline.total_conversations;
+                document.getElementById('kpi-escalations').textContent = data.quality_gates.pending_escalations;
+                document.getElementById('kpi-cost').textContent = '$' + data.cost.total_usd.toFixed(4);
+
+                const statusEntries = Object.entries(data.status_breakdown || {});
+                updateOrCreate('status', makeDoughnut,
+                    statusEntries.map(e => e[0]),
+                    statusEntries.map(e => e[1]));
+
+                const costEntries = Object.entries(data.cost.by_agent || {}).sort((a, b) => b[1] - a[1]);
+                updateOrCreate('cost',
+                    (ctx, l, v) => makeBar(ctx, l, v, '#34D399'),
+                    costEntries.map(e => e[0]),
+                    costEntries.map(e => Number(e[1].toFixed(6))));
+
+                const intentEntries = Object.entries(data.intent_distribution || {});
+                updateOrCreate('intent', makeDoughnut,
+                    intentEntries.map(e => e[0]),
+                    intentEntries.map(e => e[1]));
+
+                updateOrCreate('messages',
+                    (ctx, l, v) => makeBar(ctx, l, v, '#A78BFA'),
+                    ['Inbound', 'Outbound'],
+                    [data.pipeline.messages_inbound, data.pipeline.messages_outbound]);
+
+                document.getElementById('last-update').textContent =
+                    'Last refresh: ' + new Date().toLocaleTimeString();
+            } catch (err) {
+                document.getElementById('last-update').textContent = 'Error: ' + err.message;
+            }
+        }
+
+        refresh();
+        setInterval(refresh, 5000);
+    </script>
+</body>
+</html>

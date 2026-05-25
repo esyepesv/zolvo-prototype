@@ -1,279 +1,279 @@
-# Arquitectura — Zolvo AI Sales & Growth Engine
+# Architecture — Zolvo AI Sales & Growth Engine
 
-**Propuesta técnica · Coding Fellowship · Makers Admission 2026-2**
+**Technical submission · Coding Fellowship · Makers Admission 2026-2**
 
-**Autor:** Stiven Yepes Vanegas
-**Versión:** 0.3 (prototipo completado — todos los hitos 0-12 implementados)
-**Última actualización:** 24 de mayo de 2026
-
----
-
-## 1. Contexto del reto
-
-Zolvo opera un *AI Sales & Growth Engine* que automatiza outbound marketing y cierre inicial de ventas: identifica leads, envía mensajes personalizados vía LinkedIn/Email y agenda reuniones sin intervención humana. El reto consiste en diseñar la arquitectura técnica del sistema para lanzarlo en un nuevo mercado (México), demostrando cómo automatizar el 80% del proceso de ventas y marketing con ROI claro para el cliente.
-
-**Mercado objetivo:** México. Razones: mismo idioma, compliance manejable (LFPDPPP), ecosistema fintech B2B activo (Konfío, Klar, Stori, Kueski) que constituye ICP natural para Zolvo.
-
-**Restricciones explícitas del brief:**
-- Uso de herramientas tipo `n8n` o `Cursor AI` como orquestador visible.
-- Pipeline conectando `n8n` + `Supabase` + `LLMs`.
-- Agentes con respuestas indistinguibles de un humano (requisito, no propuesta de valor).
-- Arquitectura escalable.
+**Author:** Stiven Yepes Vanegas
+**Version:** 0.3 (prototype complete — all milestones 0-12 implemented)
+**Last updated:** May 24, 2026
 
 ---
 
-## 2. Objetivo del sistema
+## 1. Challenge context
 
-> *Automatizar el 80% del proceso de ventas y marketing outbound, garantizando ROI medible y mantenibilidad del sistema en producción.*
+Zolvo operates an *AI Sales & Growth Engine* that automates outbound marketing and initial sales closing: identifies leads, sends personalized messages via LinkedIn/Email, and books meetings without human intervention. The challenge is to design the technical architecture of the system to launch it in a new market (Mexico), demonstrating how to automate 80% of the sales and marketing process with clear ROI for the customer.
 
-Tres sub-objetivos derivados:
+**Target market:** Mexico. Reasons: same language as the company, manageable compliance (LFPDPPP), active B2B fintech ecosystem (Konfío, Klar, Stori, Kueski) that constitutes a natural ICP for Zolvo.
 
-1. **80% automatizado:** el sistema opera autónomamente en el camino feliz y escala a humano cuando duda. El 20% restante no es un bug, es diseño.
-2. **ROI claro:** cada agente registra costo, latencia y resultado. Métricas como `cost_per_meeting_booked` se calculan con una query.
-3. **Indistinguible de humano:** memoria contextual, timing variable, evaluación previa al envío, manejo de objeciones, escalamiento ante incertidumbre.
+**Explicit brief constraints:**
+- Use of tools like `n8n` or `Cursor AI` as visible orchestrator.
+- Pipeline connecting `n8n` + `Supabase` + `LLMs`.
+- Agents with responses indistinguishable from a human (requirement, not just a value proposition).
+- Scalable architecture.
 
 ---
 
-## 3. Atributos de calidad priorizados
+## 2. System objective
 
-El sistema se diseña optimizando explícitamente los siguientes atributos, en orden de prioridad:
+> *Automate 80% of the outbound sales and marketing process, guaranteeing measurable ROI and system maintainability in production.*
 
-| # | Atributo | Cómo sirve al objetivo |
+Three derived sub-objectives:
+
+1. **80% automated:** the system operates autonomously on the happy path and escalates to humans when uncertain. The remaining 20% is not a bug — it is design.
+2. **Clear ROI:** every agent records cost, latency, and result. Metrics like `cost_per_meeting_booked` are computed with a single query.
+3. **Indistinguishable from a human:** contextual memory, variable timing, pre-send evaluation, objection handling, escalation under uncertainty.
+
+---
+
+## 3. Prioritized quality attributes
+
+The system is designed explicitly optimizing the following attributes, in priority order:
+
+| # | Attribute | How it serves the objective |
 |---|---|---|
-| 1 | **Modularidad / agnosticismo** | Strategy pattern para LLMs habilita routing por costo (reducción estimada del 60-70% en gasto de tokens). |
-| 2 | **Observabilidad** | Sin métricas no hay ROI demostrable. Toda decisión de agente queda trazable. |
-| 3 | **Confiabilidad** | Retries, dead letter queues, fallbacks. Un sistema que falla y requiere rescate humano no es 80% automatizado. |
-| 4 | **Escalabilidad** | Event-driven, async, sin acoplamiento síncrono. 50 → 5000 leads/día sin re-arquitectura. |
-| 5 | **Seguridad** | RLS multi-tenant, secrets management, guardrails en outputs de LLM, compliance LFPDPPP/GDPR. |
-| 6 | **Mantenibilidad / testeabilidad** | Consecuencia de los anteriores: interfaces claras facilitan tests unitarios y mocks. |
+| 1 | **Modularity / provider agnosticism** | Strategy pattern for LLMs enables cost-based routing (estimated 60-70% reduction in token spend). |
+| 2 | **Observability** | Without metrics there is no demonstrable ROI. Every agent decision is traceable. |
+| 3 | **Reliability** | Retries, dead letter queues, fallbacks. A system that fails and requires human rescue is not 80% automated. |
+| 4 | **Scalability** | Event-driven, async, no synchronous coupling. 50 → 5000 leads/day without re-architecture. |
+| 5 | **Security** | Multi-tenant RLS, secrets management, LLM output guardrails, LFPDPPP/GDPR compliance. |
+| 6 | **Maintainability / testability** | Consequence of the above: clear interfaces make unit tests and mocks straightforward. |
 
-**Atributos NO priorizados explícitamente** (decisión consciente, no negligencia):
-- *Performance de baja latencia:* outbound es asíncrono por naturaleza, segundos vs. milisegundos no importan aquí.
-- *Disponibilidad 99.99%:* tolerable degradación temporal mientras se preserven los eventos.
+**Attributes NOT explicitly prioritized** (conscious decision, not negligence):
+- *Low-latency performance:* outbound is inherently asynchronous — seconds vs. milliseconds don't matter here.
+- *99.99% availability:* temporary degradation is tolerable as long as events are preserved.
 
 ---
 
-## 4. Estilo arquitectónico
+## 4. Architectural style
 
-**Event-driven con orquestación híbrida** (n8n + microservicios Python).
+**Event-driven with hybrid orchestration** (n8n + Python microservices).
 
-Justificación: outbound es asíncrono por naturaleza (días entre mensajes, respuestas impredecibles). Un modelo request-response síncrono no encaja con el dominio.
+Justification: outbound is asynchronous by nature (days between messages, unpredictable replies). A synchronous request-response model does not fit the domain.
 
-### 4.1 División de responsabilidades: ¿por qué no todo en n8n?
+### 4.1 Responsibility split: why not everything in n8n?
 
-El brief pide explícitamente usar n8n. Esto puede interpretarse de dos formas:
+The brief explicitly asks to use n8n. This can be interpreted two ways:
 
-- **Camino A — todo en n8n:** usar AI nodes y LangChain integrado para construir la lógica de agentes directamente en nodos de n8n.
-- **Camino B — híbrido:** n8n como capa de integración de canales y workflows visibles; servicios Python para la lógica compleja.
+- **Path A — everything in n8n:** use AI nodes and integrated LangChain to build agent logic directly in n8n nodes.
+- **Path B — hybrid:** n8n as the channel integration and visible workflow layer; Python services for complex logic.
 
-**Esta arquitectura adopta el Camino B explícitamente, no por evadir n8n, sino para preservar atributos de calidad críticos:**
+**This architecture explicitly adopts Path B — not to evade n8n, but to preserve critical quality attributes:**
 
-| Atributo | Camino A (todo n8n) | Camino B (híbrido) |
+| Attribute | Path A (all in n8n) | Path B (hybrid) |
 |---|---|---|
-| Testeabilidad | Casi imposible — lógica en JSON | Tests unitarios e integración estándar |
-| Mantenibilidad | Lógica vive en nodos sin versionado real | Código en Git, code review normal |
-| Modularidad (Strategy pattern) | Limitada por abstracciones de n8n | Implementación natural en Python |
-| Cumplimiento del brief | ✅ literal | ✅ usa n8n como pide, sin encerrarse |
-| Visibilidad para sales rep | ✅ excelente | ✅ los workflows visibles siguen en n8n |
-| Lock-in tecnológico | Alto (toda la lógica acoplada) | Bajo (n8n reemplazable sin tocar agentes) |
+| Testability | Near impossible — logic in JSON | Standard unit and integration tests |
+| Maintainability | Logic lives in nodes without real versioning | Code in Git, normal code review |
+| Modularity (Strategy pattern) | Limited by n8n abstractions | Natural implementation in Python |
+| Brief compliance | ✅ literal | ✅ uses n8n as required, without lock-in |
+| Visibility for sales rep | ✅ excellent | ✅ visible workflows remain in n8n |
+| Technology lock-in | High (all logic coupled) | Low (n8n replaceable without touching agents) |
 
-**Lo que sí hace n8n** (su trabajo pesado, no es "pasamanos"):
-- Triggers programados (re-engagement de leads en estado `dormant`)
-- Integraciones con LinkedIn, Email, Calendar (OAuth, rate limiting, retries)
-- Workflows visibles para sales reps (UI nativa de n8n)
-- Webhooks de entrada y outbox de eventos
-- Schedule de envíos respetando ventanas horarias del prospect
+**What n8n actually does** (heavy lifting, not just passthrough):
+- Scheduled triggers (re-engagement of `dormant` leads)
+- LinkedIn, Email, Calendar integrations (OAuth, rate limiting, retries)
+- Visible workflows for sales reps (n8n native UI)
+- Incoming webhooks and event outbox
+- Send scheduling respecting the prospect's business hours
 
-**Lo que hace Python:**
-- Lógica multi-agente con Strategy pattern
-- LLM Gateway con routing por costo
+**What Python does:**
+- Multi-agent logic with Strategy pattern
+- LLM Gateway with cost-based routing
 - Intent Classifier + Confidence Gate
-- Memoria contextual con pgvector
-- Procesamiento serial con debouncing
+- Contextual memory with pgvector
+- Serial processing with debouncing
 
-### 4.2 Patrones aplicados
+### 4.2 Applied patterns
 
-- *Strategy* — abstracción de proveedores de LLM y canales.
-- *Repository* — acceso a datos desacoplado de la lógica de negocio.
-- *Outbox pattern* — entrega confiable de eventos sin acoplar transacciones a brokers externos.
-- *Pipes & filters* — pipeline de procesamiento de mensajes (classify → generate → evaluate → send).
-- *Circuit breaker* — protección ante caídas de proveedores LLM o canales.
-- *Debouncing + advisory lock* — procesamiento serial garantizado por lead (ver ADR-06).
-
----
-
-## 5. Decisiones arquitectónicas (ADRs)
-
-### ADR-01 · n8n como orquestador visible, agentes como microservicios Python
-
-**Contexto:** el brief pide explícitamente `n8n` o `Cursor AI`. Implementar toda la lógica en nodos de n8n vuelve el sistema inmantenible (lógica en JSON, sin tests, sin versionado real).
-
-**Decisión:** n8n maneja los workflows visibles (entrada de leads, programación de mensajes, triggers temporales, integraciones con canales) y delega vía HTTP a servicios Python desacoplados donde reside la lógica de agentes y evaluación.
-
-**Consecuencias:**
-- ✅ Cumplimiento explícito del brief.
-- ✅ Lógica compleja queda testeable y versionable.
-- ✅ Visibilidad operativa para sales reps via UI de n8n.
-- ⚠️ Dos sistemas que mantener (operacionalmente más complejo).
+- *Strategy* — abstraction of LLM providers and channels.
+- *Repository* — data access decoupled from business logic.
+- *Outbox pattern* — reliable event delivery without coupling transactions to external brokers.
+- *Pipes & filters* — message processing pipeline (classify → generate → evaluate → send).
+- *Circuit breaker* — protection against LLM provider or channel outages.
+- *Debouncing + advisory lock* — guaranteed serial processing per lead (see ADR-06).
 
 ---
 
-### ADR-02 · Strategy pattern para proveedor de LLM con routing por costo/criticidad
+## 5. Architecture Decision Records (ADRs)
 
-**Contexto:** los LLMs son commodity, sus precios y capacidades cambian mensualmente. Acoplarse a un solo proveedor es deuda técnica garantizada.
+### ADR-01 · n8n as visible orchestrator, agents as Python microservices
 
-**Decisión:** una interfaz `LLMProvider` con implementaciones para OpenAI, Anthropic, Ollama y OpenRouter. Cada agente recibe el provider por inyección. Un router decide el modelo según el tipo de tarea: modelos baratos para clasificación y evaluación, modelos premium para generación crítica.
+**Context:** the brief explicitly asks for `n8n` or `Cursor AI`. Implementing all logic in n8n nodes makes the system unmaintainable (logic in JSON, no tests, no real versioning).
 
-**Consecuencias:**
-- ✅ Reducción de costos del 60-70% vs. usar modelo premium para todo.
-- ✅ Migración entre proveedores sin tocar lógica de negocio.
-- ✅ Habilita uso de modelos locales (Ollama) para tareas sensibles a PII.
-- ⚠️ Complejidad adicional en pruebas (mocks obligatorios).
+**Decision:** n8n manages visible workflows (lead intake, message scheduling, temporal triggers, channel integrations) and delegates via HTTP to decoupled Python services where agent logic and evaluation reside.
 
----
-
-### ADR-03 · Event-driven con Supabase Realtime + outbox pattern
-
-**Contexto:** las conversaciones outbound son asíncronas. Esperar horas o días entre turnos es la norma. Un modelo síncrono fuerza polling o bloqueos.
-
-**Decisión:** eventos de dominio (`lead.created`, `message.sent`, `reply.received`, `meeting.booked`, `escalation.required`) publicados via Supabase Realtime. Para eventos críticos se aplica outbox pattern: el evento se escribe en la misma transacción que el cambio de estado y un worker lo publica después.
-
-**Consecuencias:**
-- ✅ Sin polling, sin bloqueos.
-- ✅ Entrega confiable de eventos (at-least-once).
-- ✅ Escalabilidad horizontal natural.
-- ⚠️ Debugging de flujos distribuidos requiere observabilidad fuerte (mitigado por ADR-04).
+**Consequences:**
+- ✅ Explicit brief compliance.
+- ✅ Complex logic remains testable and versionable.
+- ✅ Operational visibility for sales reps via n8n UI.
+- ⚠️ Two systems to maintain (operationally more complex).
 
 ---
 
-### ADR-04 · Pipeline de dos puertas: Intent Classifier + Confidence Gate
+### ADR-02 · Strategy pattern for LLM provider with cost/criticality routing
 
-**Contexto:** ningún sistema autónomo es 100% confiable. Pretenderlo es ingenuo y operativamente peligroso (un agente quemando leads por una alucinación cuesta más que cualquier ahorro). Confiar únicamente en el "low confidence" del generador es insuficiente: los LLMs tienden a sobre-confiar y alucinar antes que admitir incertidumbre.
+**Context:** LLMs are commodities — their prices and capabilities change monthly. Coupling to a single provider is guaranteed technical debt.
 
-**Decisión:** dos puertas independientes en el pipeline.
+**Decision:** an `LLMProvider` interface with implementations for OpenAI, Anthropic, Ollama, and OpenRouter. Each agent receives the provider by injection. A router selects the model based on task type: cheap models for classification and evaluation, premium models for critical generation.
 
-**Puerta 1 — Intent Classifier (antes de generar):** un clasificador rápido y barato (Haiku, Llama-3.1-8B o equivalente) lee el mensaje entrante y lo categoriza en un set predefinido: `interested`, `objection_price`, `objection_authority`, `objection_timing`, `meeting_intent`, `complaint`, `complex_technical`, `out_of_scope`, `opt_out`. Categorías sensibles (`complaint`, `complex_technical`, `out_of_scope`, `opt_out`) hacen **handoff directo a humano sin pasar por generación**. Esto previene que el agente intente responder algo para lo que no debería.
-
-**Puerta 2 — Confidence Gate (después de generar):** para mensajes que sí pasan a generación, el output se evalúa antes de enviar. Otro LLM (modelo barato) puntúa el `confidence_score` en los ejes de naturalidad, relevancia y riesgo. Si baja del umbral configurable, escala a humano vía Slack con contexto completo.
-
-**Consecuencias:**
-- ✅ Operacionaliza el 80% del brief con doble salvaguarda.
-- ✅ Reduce alucinaciones: lo que no debería responderse, no se intenta responder.
-- ✅ Cada decisión queda auditable (tanto la clasificación como la evaluación).
-- ✅ Genera dataset etiquetado para fine-tuning futuro.
-- ⚠️ 2 llamadas LLM extra por mensaje entrante (~$0.002 con modelos baratos). Costo trivial frente al riesgo evitado.
+**Consequences:**
+- ✅ 60-70% cost reduction vs. using premium models for everything.
+- ✅ Provider migration without touching business logic.
+- ✅ Enables local models (Ollama) for PII-sensitive tasks.
+- ⚠️ Additional complexity in tests (mandatory mocks).
 
 ---
 
-### ADR-05 · Multi-tenant desde el día uno con Row-Level Security
+### ADR-03 · Event-driven with Supabase Realtime + outbox pattern
 
-**Contexto:** Zolvo es B2B. Múltiples clientes comparten la infraestructura. Una fuga entre tenants sería catastrófica.
+**Context:** outbound conversations are asynchronous. Waiting hours or days between turns is the norm. A synchronous model forces polling or blocking.
 
-**Decisión:** todas las tablas operacionales llevan `tenant_id`. Políticas de RLS en Postgres garantizan aislamiento a nivel de fila. La aplicación nunca filtra por `tenant_id` manualmente — depende de RLS + contexto de sesión.
+**Decision:** domain events (`lead.created`, `message.sent`, `reply.received`, `meeting.booked`, `escalation.required`) published via Supabase Realtime. For critical events the outbox pattern applies: the event is written in the same transaction as the state change and a worker publishes it afterwards.
 
-**Consecuencias:**
-- ✅ Aislamiento garantizado a nivel de base de datos, no de aplicación.
-- ✅ Cumplimiento LFPDPPP/GDPR (derecho al olvido vía RLS y soft-deletes).
-- ⚠️ Performance: índices con `tenant_id` como primer campo son obligatorios.
-
----
-
-### ADR-06 · Procesamiento serial por lead con debouncing y advisory lock
-
-**Contexto:** un prospect puede enviar mensajes rápidos seguidos ("Hola", 3 segundos después "Me interesa, ¿precios?"). Si el sistema procesa en paralelo, dos agentes leen historial incompleto y envían respuestas desincronizadas. Nada delata más a un bot que esto. Adicionalmente, respuestas instantáneas (< 5 segundos) también delatan al bot: un humano leyendo LinkedIn no responde en 2 segundos.
-
-**Decisión:** combinar dos mecanismos.
-
-1. **Debouncing en ingesta:** cuando llega un mensaje, el sistema espera entre 30 y 90 segundos (jitter aleatorio, configurable por canal y horario) antes de procesarlo. Si llega otro mensaje del mismo lead durante ese tiempo, el timer se reinicia y los mensajes se agrupan como un solo turno conversacional.
-
-2. **Advisory lock en procesamiento:** antes de procesar un turno, el worker adquiere un `pg_advisory_xact_lock(lead_id)` en Postgres. Esto garantiza procesamiento serial estricto por lead, incluso si múltiples workers compiten por el mismo evento.
-
-**Consecuencias:**
-- ✅ Elimina race conditions en mensajes concurrentes del mismo lead.
-- ✅ La latencia "natural" deja de ser bug y se convierte en feature de humanización.
-- ✅ Reduce costo: mensajes agrupados = una sola llamada LLM en vez de N.
-- ⚠️ Aumenta latencia de respuesta — aceptable y deseable en outbound asíncrono.
-- ⚠️ Requiere monitoreo: si el debouncing se desboca, el sistema responde lento sin justificación.
+**Consequences:**
+- ✅ No polling, no blocking.
+- ✅ Reliable event delivery (at-least-once).
+- ✅ Natural horizontal scalability.
+- ⚠️ Debugging distributed flows requires strong observability (mitigated by ADR-04).
 
 ---
 
-### ADR-07 · Estrategia de memoria dual: contexto inmediato + memoria semántica
+### ADR-04 · Two-gate pipeline: Intent Classifier + Confidence Gate
 
-**Contexto:** la "memoria" de un agente conversacional tiene dos necesidades distintas que se confunden frecuentemente: el contexto inmediato del thread actual (qué se dijo hace 2 mensajes) y la memoria semántica de largo plazo (qué objeciones similares se resolvieron en otros leads, qué dijo este mismo lead hace 3 semanas).
+**Context:** no autonomous system is 100% reliable. Pretending otherwise is naive and operationally dangerous (an agent burning leads through hallucination costs more than any savings). Relying solely on the generator's "low confidence" is insufficient: LLMs tend to over-confident hallucination rather than admitting uncertainty.
 
-Resolver ambas con el mismo mecanismo es subóptimo: vectorizar el thread actual es costoso e innecesario; cargar todo el historial textual es imposible más allá de cierto volumen.
+**Decision:** two independent gates in the pipeline.
 
-**Decisión:** estrategia dual.
+**Gate 1 — Intent Classifier (before generating):** a fast, cheap classifier (Haiku, Llama-3.1-8B or equivalent) reads the incoming message and categorizes it into a predefined set: `interested`, `objection_price`, `objection_authority`, `objection_timing`, `meeting_intent`, `complaint`, `complex_technical`, `out_of_scope`, `opt_out`. Sensitive categories (`complaint`, `complex_technical`, `out_of_scope`, `opt_out`) trigger **direct handoff to a human without passing through generation**. This prevents the agent from attempting to respond to something it should not.
 
-**Memoria de corto plazo (textual):** los últimos N mensajes de la conversación actual se cargan textuales desde la tabla `messages` y se inyectan al prompt como `chat_history`. N es configurable (típicamente 10-20 turnos). No se vectoriza. Acceso O(1) por `conversation_id`.
+**Gate 2 — Confidence Gate (after generating):** for messages that do pass to generation, the output is evaluated before sending. Another LLM (cheap model) scores the `confidence_score` on naturalness, relevance, and risk axes. If it falls below the configurable threshold, it escalates to a human via Slack with full context.
 
-**Memoria de largo plazo (semántica):** conversaciones cerradas, casos exitosos de objeciones, perfiles de leads similares e ICP — todo vive como embeddings en `lead_embeddings` y una tabla nueva `conversation_summaries_embeddings`. El agente consulta vía similarity search (pgvector) cuando necesita contexto que no está en la ventana inmediata.
-
-**Consecuencias:**
-- ✅ Eficiencia: no vectorizamos lo que no necesita búsqueda semántica.
-- ✅ Calidad: el agente tiene contexto preciso reciente + contexto relevante histórico.
-- ✅ Costo controlado: embeddings se generan al cerrar conversaciones, no en cada turno.
-- ⚠️ Complejidad: dos mecanismos de memoria en lugar de uno. Mitigado encapsulando ambos en `MemoryService` con una interfaz unificada.
+**Consequences:**
+- ✅ Operationalizes the brief's 80% with a double safeguard.
+- ✅ Reduces hallucinations: what shouldn't be responded to, isn't attempted.
+- ✅ Every decision is auditable (both classification and evaluation).
+- ✅ Generates a labeled dataset for future fine-tuning.
+- ⚠️ 2 extra LLM calls per incoming message (~$0.002 with cheap models). Trivial cost vs. the avoided risk.
 
 ---
 
-## 6. Diagramas C4
+### ADR-05 · Multi-tenant from day one with Row-Level Security
 
-### 6.1 Nivel 1 — Contexto
+**Context:** Zolvo is B2B. Multiple clients share the infrastructure. A cross-tenant data leak would be catastrophic.
+
+**Decision:** all operational tables carry `tenant_id`. RLS policies in Postgres guarantee row-level isolation. The application never manually filters by `tenant_id` — it relies on RLS + session context.
+
+**Consequences:**
+- ✅ Isolation guaranteed at the database level, not the application level.
+- ✅ LFPDPPP/GDPR compliance (right to erasure via RLS and soft-deletes).
+- ⚠️ Performance: indexes with `tenant_id` as the first field are mandatory.
+
+---
+
+### ADR-06 · Serial processing per lead with debouncing and advisory lock
+
+**Context:** a prospect may send rapid successive messages ("Hi", 3 seconds later "I'm interested, pricing?"). If the system processes in parallel, two agents read incomplete history and send desynchronized responses. Nothing exposes a bot more than this. Additionally, instant responses (< 5 seconds) also expose the bot: a human reading LinkedIn doesn't reply in 2 seconds.
+
+**Decision:** combine two mechanisms.
+
+1. **Debouncing on ingestion:** when a message arrives, the system waits between 30 and 90 seconds (random jitter, configurable by channel and time of day) before processing it. If another message from the same lead arrives during that window, the timer resets and the messages are grouped as a single conversational turn.
+
+2. **Advisory lock on processing:** before processing a turn, the worker acquires a `pg_advisory_xact_lock(lead_id)` in Postgres. This guarantees strict serial processing per lead, even if multiple workers compete for the same event.
+
+**Consequences:**
+- ✅ Eliminates race conditions on concurrent messages from the same lead.
+- ✅ "Natural" latency stops being a bug and becomes a humanization feature.
+- ✅ Reduces cost: grouped messages = one LLM call instead of N.
+- ⚠️ Increases response latency — acceptable and desirable in async outbound.
+- ⚠️ Requires monitoring: if debouncing drifts, the system responds slowly without justification.
+
+---
+
+### ADR-07 · Dual memory strategy: immediate context + semantic memory
+
+**Context:** the "memory" of a conversational agent has two distinct needs that are frequently confused: the immediate context of the current thread (what was said 2 messages ago) and long-term semantic memory (how similar objections were resolved in other leads, what this same lead said 3 weeks ago).
+
+Solving both with the same mechanism is suboptimal: vectorizing the current thread is expensive and unnecessary; loading all textual history is impossible beyond a certain volume.
+
+**Decision:** dual strategy.
+
+**Short-term memory (textual):** the last N messages of the current conversation are loaded as text from the `messages` table and injected into the prompt as `chat_history`. N is configurable (typically 10-20 turns). Not vectorized. O(1) access by `conversation_id`.
+
+**Long-term memory (semantic):** closed conversations, successful objection cases, similar lead profiles, and ICP — all stored as embeddings in `lead_embeddings` and a new `conversation_summaries_embeddings` table. The agent queries via similarity search (pgvector) when it needs context outside the immediate window.
+
+**Consequences:**
+- ✅ Efficiency: we don't vectorize what doesn't need semantic search.
+- ✅ Quality: the agent has precise recent context + relevant historical context.
+- ✅ Controlled cost: embeddings are generated when closing conversations, not on every turn.
+- ⚠️ Complexity: two memory mechanisms instead of one. Mitigated by encapsulating both in `MemoryService` with a unified interface.
+
+---
+
+## 6. C4 Diagrams
+
+### 6.1 Level 1 — Context
 
 ```plantuml
 @startuml C4_Context_Zolvo
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
 
 LAYOUT_WITH_LEGEND()
-title Diagrama de Contexto (C4 L1) - Zolvo AI Sales Engine
+title Context Diagram (C4 L1) - Zolvo AI Sales Engine
 
-Person(sales_rep, "Sales Rep / Operador", "Configura ICP, campanas y atiende handoffs de baja confianza")
-Person_Ext(prospect, "Prospect / Lead", "Decision maker contactado por el sistema")
+Person(sales_rep, "Sales Rep / Operator", "Configures ICP, campaigns, and handles low-confidence handoffs")
+Person_Ext(prospect, "Prospect / Lead", "Decision maker contacted by the system")
 
-System(zolvo, "Zolvo AI Sales Engine", "Automatiza outbound y conversaciones de ventas con agentes de IA indistinguibles de humanos")
+System(zolvo, "Zolvo AI Sales Engine", "Automates outbound and sales conversations with AI agents indistinguishable from humans")
 
-System_Ext(linkedin, "LinkedIn", "Canal principal de outbound y conversacion")
-System_Ext(email, "Email Provider", "Gmail / Outlook - canal secundario")
-System_Ext(calendar, "Calendar", "Google Calendar / Calendly - agendamiento")
+System_Ext(linkedin, "LinkedIn", "Primary outbound and conversation channel")
+System_Ext(email, "Email Provider", "Gmail / Outlook - secondary channel")
+System_Ext(calendar, "Calendar", "Google Calendar / Calendly - meeting scheduling")
 System_Ext(llm, "LLM Providers", "OpenAI, Anthropic, Ollama, OpenRouter")
-System_Ext(slack, "Slack", "Notificaciones y handoff a humano")
-System_Ext(crm, "CRM externo (opcional)", "HubSpot / Salesforce")
+System_Ext(slack, "Slack", "Notifications and human handoff")
+System_Ext(crm, "External CRM (optional)", "HubSpot / Salesforce")
 
-Rel(sales_rep, zolvo, "Configura ICP, prompts, revisa pipeline y atiende escalamientos")
-Rel(zolvo, prospect, "Envia mensajes personalizados y responde threads")
-Rel(prospect, zolvo, "Responde mensajes, agenda reunion")
-Rel(zolvo, linkedin, "Envia/recibe mensajes", "API/Adapter")
-Rel(zolvo, email, "Envia/recibe correos", "SMTP/IMAP")
-Rel(zolvo, calendar, "Crea eventos, consulta disponibilidad", "REST")
-Rel(zolvo, llm, "Genera respuestas, embeddings y evalua", "HTTPS")
-Rel(zolvo, slack, "Escala conversaciones de baja confianza", "Webhook")
-Rel(zolvo, crm, "Sincroniza leads y oportunidades", "REST")
+Rel(sales_rep, zolvo, "Configures ICP, prompts, reviews pipeline and handles escalations")
+Rel(zolvo, prospect, "Sends personalized messages and responds to threads")
+Rel(prospect, zolvo, "Replies to messages, books meeting")
+Rel(zolvo, linkedin, "Sends/receives messages", "API/Adapter")
+Rel(zolvo, email, "Sends/receives emails", "SMTP/IMAP")
+Rel(zolvo, calendar, "Creates events, checks availability", "REST")
+Rel(zolvo, llm, "Generates responses, embeddings and evaluates", "HTTPS")
+Rel(zolvo, slack, "Escalates low-confidence conversations", "Webhook")
+Rel(zolvo, crm, "Syncs leads and opportunities", "REST")
 
 @enduml
 ```
 
 ---
 
-### 6.2 Nivel 2 — Contenedores
+### 6.2 Level 2 — Containers
 
 ```plantuml
 @startuml C4_Container_Zolvo
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
 
 LAYOUT_WITH_LEGEND()
-title Diagrama de Contenedores (C4 L2) - Zolvo AI Sales Engine
+title Container Diagram (C4 L2) - Zolvo AI Sales Engine
 
-Person(sales_rep, "Sales Rep / Operador")
+Person(sales_rep, "Sales Rep / Operator")
 Person_Ext(prospect, "Prospect")
 
 System_Boundary(zolvo, "Zolvo AI Sales Engine") {
-    Container(n8n, "n8n Orchestrator", "Node.js / n8n", "Workflows visibles: schedule, triggers, integraciones con canales, retries")
-    Container(agents_api, "Agent Services API", "Python / FastAPI", "Logica de negocio: orquestacion de agentes, evaluador, gateway de LLM")
-    Container(channel_adapters, "Channel Adapters", "Python", "Wrappers para LinkedIn, Email, Calendar - desacopla canales del core")
-    ContainerQueue(event_bus, "Event Bus", "Supabase Realtime + Outbox", "Eventos asincronos: lead.created, message.sent, reply.received, escalation.required")
-    ContainerDb(db, "Operational Store", "Supabase Postgres + pgvector", "Leads, conversaciones, mensajes, embeddings, agent_runs, RLS multi-tenant")
-    Container(obs, "Observability Stack", "Logs / Metrics / Traces", "Costo por lead, latencia, conversion rate por etapa, errores")
+    Container(n8n, "n8n Orchestrator", "Node.js / n8n", "Visible workflows: scheduling, triggers, channel integrations, retries")
+    Container(agents_api, "Agent Services API", "Python / FastAPI", "Business logic: agent orchestration, evaluator, LLM gateway")
+    Container(channel_adapters, "Channel Adapters", "Python", "Wrappers for LinkedIn, Email, Calendar — decouples channels from core")
+    ContainerQueue(event_bus, "Event Bus", "Supabase Realtime + Outbox", "Async events: lead.created, message.sent, reply.received, escalation.required")
+    ContainerDb(db, "Operational Store", "Supabase Postgres + pgvector", "Leads, conversations, messages, embeddings, agent_runs, RLS multi-tenant")
+    Container(obs, "Observability Stack", "Logs / Metrics / Traces", "Cost per lead, latency, conversion rate by stage, errors")
 }
 
 System_Ext(linkedin, "LinkedIn")
@@ -282,35 +282,35 @@ System_Ext(calendar, "Calendar")
 System_Ext(llm, "LLM Providers")
 System_Ext(slack, "Slack")
 
-Rel(sales_rep, n8n, "Configura campanas y revisa estado", "UI / Webhook")
-Rel(prospect, channel_adapters, "Recibe y envia mensajes")
+Rel(sales_rep, n8n, "Configures campaigns and reviews status", "UI / Webhook")
+Rel(prospect, channel_adapters, "Receives and sends messages")
 
-Rel(n8n, agents_api, "Invoca agentes para tareas especificas", "HTTPS / JSON")
-Rel(n8n, channel_adapters, "Dispara envios programados", "HTTPS")
-Rel(channel_adapters, event_bus, "Publica replies entrantes y eventos de canal")
-Rel(event_bus, agents_api, "Entrega eventos para procesamiento async", "Subscribe")
-Rel(agents_api, db, "Lee y escribe estado operacional", "SQL + pgvector")
-Rel(agents_api, llm, "Genera contenido y evalua salidas", "HTTPS")
-Rel(agents_api, event_bus, "Publica eventos de dominio (outbox pattern)")
-Rel(agents_api, obs, "Emite logs, trazas y metricas")
-Rel(channel_adapters, linkedin, "Envia y recibe mensajes")
+Rel(n8n, agents_api, "Invokes agents for specific tasks", "HTTPS / JSON")
+Rel(n8n, channel_adapters, "Triggers scheduled sends", "HTTPS")
+Rel(channel_adapters, event_bus, "Publishes incoming replies and channel events")
+Rel(event_bus, agents_api, "Delivers events for async processing", "Subscribe")
+Rel(agents_api, db, "Reads and writes operational state", "SQL + pgvector")
+Rel(agents_api, llm, "Generates content and evaluates outputs", "HTTPS")
+Rel(agents_api, event_bus, "Publishes domain events (outbox pattern)")
+Rel(agents_api, obs, "Emits logs, traces and metrics")
+Rel(channel_adapters, linkedin, "Sends and receives messages")
 Rel(channel_adapters, email, "SMTP / IMAP")
-Rel(channel_adapters, calendar, "Crea eventos", "REST")
-Rel(agents_api, slack, "Handoff cuando confidence_score < umbral", "Webhook")
+Rel(channel_adapters, calendar, "Creates events", "REST")
+Rel(agents_api, slack, "Handoff when confidence_score < threshold", "Webhook")
 
 @enduml
 ```
 
 ---
 
-### 6.3 Nivel 3 — Componentes (Agent Services API)
+### 6.3 Level 3 — Components (Agent Services API)
 
 ```plantuml
 @startuml C4_Component_AgentServices
 !include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
 
 LAYOUT_WITH_LEGEND()
-title Diagrama de Componentes (C4 L3) - Agent Services API
+title Component Diagram (C4 L3) - Agent Services API
 
 Container(n8n, "n8n Orchestrator", "Node.js")
 ContainerQueue(event_bus, "Event Bus", "Supabase Realtime + Outbox")
@@ -319,68 +319,68 @@ System_Ext(llm, "LLM Providers")
 System_Ext(slack, "Slack")
 
 Container_Boundary(api, "Agent Services API (FastAPI)") {
-    Component(controller, "Agent Controller", "FastAPI Router", "Expone HTTP: /agents/run, /events/consume, /health")
-    Component(orchestrator, "Agent Orchestrator", "Python Service", "Decide que agente invocar segun el estado de la conversacion")
+    Component(controller, "Agent Controller", "FastAPI Router", "Exposes HTTP: /agents/run, /events/consume, /health")
+    Component(orchestrator, "Agent Orchestrator", "Python Service", "Decides which agent to invoke based on conversation state")
 
-    Component(intent_classifier, "Intent Classifier", "Python Service", "Puerta 1: clasifica mensaje entrante en categorias predefinidas. Rutea o hace handoff directo sin generar")
+    Component(intent_classifier, "Intent Classifier", "Python Service", "Gate 1: classifies incoming message into predefined categories. Routes or hands off directly without generating")
 
-    Component(researcher, "Researcher Agent", "Strategy", "Enriquece datos del lead y genera embedding de perfil")
-    Component(copywriter, "Copywriter Agent", "Strategy", "Genera mensaje inicial personalizado segun perfil + ICP")
-    Component(conversationalist, "Conversationalist Agent", "Strategy", "Mantiene threads multi-turn con memoria dual")
-    Component(objection_handler, "Objection Handler Agent", "Strategy", "Maneja objeciones complejas: precio, timing, autoridad")
-    Component(scheduler, "Scheduler Agent", "Strategy", "Detecta intent de reunion y cierra agendamiento")
+    Component(researcher, "Researcher Agent", "Strategy", "Enriches lead data and generates profile embedding")
+    Component(copywriter, "Copywriter Agent", "Strategy", "Generates personalized initial outbound message based on profile + ICP")
+    Component(conversationalist, "Conversationalist Agent", "Strategy", "Maintains multi-turn threads with dual memory")
+    Component(objection_handler, "Objection Handler Agent", "Strategy", "Handles complex objections: price, timing, authority")
+    Component(scheduler, "Scheduler Agent", "Strategy", "Detects meeting intent and closes scheduling")
 
-    Component(evaluator, "Confidence Gate / Evaluator", "Python Service", "Puerta 2: puntua cada output antes de enviar; escala si baja del umbral")
-    Component(memory, "Memory Service", "Python Service", "Memoria dual: chat_history textual (corto plazo) + RAG con pgvector (largo plazo)")
-    Component(llm_gateway, "LLM Gateway", "Strategy Pattern", "Abstrae proveedores; enruta por costo/criticidad")
-    Component(repos, "Repository Layer", "Python", "Acceso a leads, conversations, messages, agent_runs")
+    Component(evaluator, "Confidence Gate / Evaluator", "Python Service", "Gate 2: scores each output before sending; escalates if below threshold")
+    Component(memory, "Memory Service", "Python Service", "Dual memory: textual chat_history (short-term) + RAG with pgvector (long-term)")
+    Component(llm_gateway, "LLM Gateway", "Strategy Pattern", "Abstracts providers; routes by cost/criticality")
+    Component(repos, "Repository Layer", "Python", "Access to leads, conversations, messages, agent_runs")
 }
 
-Rel(n8n, controller, "Invoca agentes", "HTTPS / JSON")
-Rel(event_bus, controller, "Entrega eventos async", "Subscribe")
+Rel(n8n, controller, "Invokes agents", "HTTPS / JSON")
+Rel(event_bus, controller, "Delivers async events", "Subscribe")
 
-Rel(controller, orchestrator, "Delega ejecucion")
+Rel(controller, orchestrator, "Delegates execution")
 
-Rel(orchestrator, intent_classifier, "Clasifica mensaje entrante antes de generar")
-Rel(intent_classifier, llm_gateway, "Usa modelo barato para clasificar")
-Rel(intent_classifier, slack, "Handoff directo si intent no es respondible", "Webhook")
+Rel(orchestrator, intent_classifier, "Classifies incoming message before generating")
+Rel(intent_classifier, llm_gateway, "Uses cheap model to classify")
+Rel(intent_classifier, slack, "Direct handoff if intent is not handleable", "Webhook")
 
-Rel(orchestrator, researcher, "Invoca")
-Rel(orchestrator, copywriter, "Invoca")
-Rel(orchestrator, conversationalist, "Invoca")
-Rel(orchestrator, objection_handler, "Invoca")
-Rel(orchestrator, scheduler, "Invoca")
+Rel(orchestrator, researcher, "Invokes")
+Rel(orchestrator, copywriter, "Invokes")
+Rel(orchestrator, conversationalist, "Invokes")
+Rel(orchestrator, objection_handler, "Invokes")
+Rel(orchestrator, scheduler, "Invokes")
 
-Rel(researcher, memory, "Indexa perfil del lead")
-Rel(conversationalist, memory, "Recupera contexto relevante")
-Rel(objection_handler, memory, "Recupera contexto y casos previos")
-Rel(copywriter, memory, "Consulta ejemplos exitosos por ICP")
+Rel(researcher, memory, "Indexes lead profile")
+Rel(conversationalist, memory, "Retrieves relevant context")
+Rel(objection_handler, memory, "Retrieves context and previous cases")
+Rel(copywriter, memory, "Retrieves successful ICP examples")
 
-Rel(researcher, llm_gateway, "Genera enrichment")
-Rel(copywriter, llm_gateway, "Genera mensaje")
-Rel(conversationalist, llm_gateway, "Genera respuesta")
-Rel(objection_handler, llm_gateway, "Genera respuesta a objecion")
-Rel(scheduler, llm_gateway, "Genera confirmacion / parsea intent")
+Rel(researcher, llm_gateway, "Generates enrichment")
+Rel(copywriter, llm_gateway, "Generates message")
+Rel(conversationalist, llm_gateway, "Generates response")
+Rel(objection_handler, llm_gateway, "Generates objection response")
+Rel(scheduler, llm_gateway, "Generates confirmation / parses intent")
 
-Rel(orchestrator, evaluator, "Evalua salida antes de enviar")
-Rel(evaluator, llm_gateway, "Usa modelo barato para puntuar")
-Rel(evaluator, slack, "Escala si confidence_score < umbral", "Webhook")
+Rel(orchestrator, evaluator, "Evaluates output before sending")
+Rel(evaluator, llm_gateway, "Uses cheap model to score")
+Rel(evaluator, slack, "Escalates if confidence_score < threshold", "Webhook")
 
-Rel(llm_gateway, llm, "Llama proveedor seleccionado")
-Rel(memory, repos, "Persiste y consulta embeddings")
+Rel(llm_gateway, llm, "Calls selected provider")
+Rel(memory, repos, "Persists and queries embeddings")
 Rel(repos, db, "SQL + pgvector")
-Rel(orchestrator, repos, "Persiste agent_runs para observabilidad")
+Rel(orchestrator, repos, "Persists agent_runs for observability")
 
 @enduml
 ```
 
 ---
 
-## 7. Diagrama de secuencia — Happy Path
+## 7. Sequence diagram — Happy Path
 
 ```plantuml
 @startuml Sequence_HappyPath_Zolvo
-title Diagrama de Secuencia - Happy Path AI Sales Engine (v0.2)
+title Sequence Diagram - Happy Path AI Sales Engine (v0.2)
 
 skinparam sequenceMessageAlign center
 skinparam responseMessageBelowArrow true
@@ -388,11 +388,11 @@ skinparam maxMessageSize 180
 autonumber
 
 actor "Prospect" as P
-box "Capa de canales" #F0F4FA
+box "Channel Layer" #F0F4FA
 participant "Channel Adapter\n(LinkedIn / Email)" as CA
 end box
 
-box "Orquestacion" #F5F0FA
+box "Orchestration" #F5F0FA
 participant "n8n" as N8N
 queue "Event Bus\n(Supabase Realtime)" as BUS
 end box
@@ -408,154 +408,154 @@ participant "Evaluator\n(Confidence Gate)" as EVAL
 participant "LLM Gateway" as LLM
 end box
 
-box "Datos" #F7F6F0
+box "Data" #F7F6F0
 database "Supabase\n(postgres + pgvector)" as DB
 end box
 
 actor "Sales Rep" as SR
 
-== Fase 1 — Ingesta y enriquecimiento (async, en background) ==
+== Phase 1 — Ingestion and enrichment (async, in background) ==
 
-N8N -> CA : Trigger: nuevo lead desde fuente (CSV / API)
-CA -> BUS : Publica evento lead.created
-BUS -> ORC : Entrega evento async
+N8N -> CA : Trigger: new lead from source (CSV / API)
+CA -> BUS : Publishes lead.created event
+BUS -> ORC : Delivers event async
 ORC -> RES : run(lead_id)
-RES -> DB : Consulta perfil base del lead
-RES -> LLM : Genera enrichment + embedding (modelo barato)
-LLM --> RES : datos enriquecidos + vector
-RES -> DB : Persiste lead_embeddings + agent_runs
+RES -> DB : Queries base lead profile
+RES -> LLM : Generates enrichment + embedding (cheap model)
+LLM --> RES : enriched data + vector
+RES -> DB : Persists lead_embeddings + agent_runs
 RES --> ORC : OK + enriched_profile
 
 note over RES
-  Researcher corre UNA VEZ al ingerir el lead.
-  El resultado queda pre-computado para todas
-  las interacciones futuras. No re-investiga
-  en cada turno conversacional.
+  Researcher runs ONCE on lead ingestion.
+  The result is pre-computed for all
+  future interactions. Does not re-research
+  on every conversational turn.
 end note
 
-== Fase 2 — Primer mensaje outbound ==
+== Phase 2 — First outbound message ==
 
 ORC -> COP : run(lead_id, enriched_profile, ICP)
-COP -> DB : Recupera ejemplos exitosos por ICP (RAG)
-COP -> LLM : Genera mensaje inicial (modelo premium)
-LLM --> COP : mensaje propuesto
+COP -> DB : Retrieves successful ICP examples (RAG)
+COP -> LLM : Generates initial message (premium model)
+LLM --> COP : proposed message
 COP --> ORC : draft_message + meta
 
 ORC -> EVAL : evaluate(draft_message, context)
-EVAL -> LLM : Puntua naturalidad/relevancia/riesgo (modelo barato)
+EVAL -> LLM : Scores naturalness/relevance/risk (cheap model)
 LLM --> EVAL : confidence_score = 0.87
 
-alt confidence_score >= umbral
-  EVAL --> ORC : APROBADO
-  ORC -> DB : Persiste message + agent_runs (costo, latencia)
+alt confidence_score >= threshold
+  EVAL --> ORC : APPROVED
+  ORC -> DB : Persists message + agent_runs (cost, latency)
   ORC -> CA : send(message)
-  CA -> P : Envia DM / Email
-  ORC -> BUS : Publica message.sent
-else confidence_score < umbral
+  CA -> P : Sends DM / Email
+  ORC -> BUS : Publishes message.sent
+else confidence_score < threshold
   EVAL -> SR : Handoff via Slack
 end
 
-== Fase 3 — Respuesta multi-turn con debouncing e intent classification ==
+== Phase 3 — Multi-turn reply with debouncing and intent classification ==
 
 ...wait for reply (event-driven, no polling)...
 
-P -> CA : Responde con interes + objecion de precio
-CA -> BUS : Publica reply.received (raw)
+P -> CA : Replies with interest + price objection
+CA -> BUS : Publishes reply.received (raw)
 
 note over BUS, ORC
-  Debouncing: espera 30-90s (jitter aleatorio).
-  Si llega otro mensaje del mismo lead durante
-  ese tiempo, reinicia timer y agrupa como un
-  unico turno conversacional.
+  Debouncing: waits 30-90s (random jitter).
+  If another message from the same lead arrives
+  during that window, resets timer and groups
+  as a single conversational turn.
 end note
 
-BUS -> ORC : Entrega evento agrupado (post-debounce)
-ORC -> ORC : Adquiere pg_advisory_xact_lock(lead_id)
+BUS -> ORC : Delivers grouped event (post-debounce)
+ORC -> ORC : Acquires pg_advisory_xact_lock(lead_id)
 
-== Puerta 1 — Intent Classifier ==
+== Gate 1 — Intent Classifier ==
 
 ORC -> CLAS : classify_intent(latest_reply)
-CLAS -> LLM : Clasifica (modelo barato, baja latencia)
+CLAS -> LLM : Classifies (cheap model, low latency)
 LLM --> CLAS : intent = objection_price
 CLAS --> ORC : route -> Conversationalist
 
-alt intent en [complaint, complex_technical, out_of_scope, opt_out]
-  ORC -> SR : Handoff directo via Slack (sin generar respuesta)
-else intent permite respuesta automatica
-  ORC -> DB : Carga historial textual reciente (ADR-07)
+alt intent in [complaint, complex_technical, out_of_scope, opt_out]
+  ORC -> SR : Direct handoff via Slack (without generating a response)
+else intent allows automated response
+  ORC -> DB : Loads recent textual history (ADR-07)
   ORC -> CONV : run(conversation_id, latest_reply, intent)
-  CONV -> DB : Recupera memoria semantica relevante (pgvector)
-  CONV -> LLM : Genera respuesta con contexto dual (modelo premium)
+  CONV -> DB : Retrieves relevant semantic memory (pgvector)
+  CONV -> LLM : Generates response with dual context (premium model)
   LLM --> CONV : draft_reply
   CONV --> ORC : draft_reply
 
-  == Puerta 2 — Confidence Gate ==
+  == Gate 2 — Confidence Gate ==
   ORC -> EVAL : evaluate(draft_reply)
-  EVAL --> ORC : confidence_score = 0.91 — APROBADO
-  ORC -> DB : Persiste message + agent_runs
+  EVAL --> ORC : confidence_score = 0.91 — APPROVED
+  ORC -> DB : Persists message + agent_runs
   ORC -> CA : send(reply)
-  CA -> P : Responde
-  ORC -> BUS : Publica message.sent
+  CA -> P : Responds
+  ORC -> BUS : Publishes message.sent
 end
 
-== Fase 4 — Deteccion de intent de agendamiento ==
+== Phase 4 — Meeting intent detection ==
 
-P -> CA : "Me interesa, agendemos llamada"
-CA -> BUS : Publica reply.received
+P -> CA : "I'm interested, let's schedule a call"
+CA -> BUS : Publishes reply.received
 
 note over BUS, ORC
-  Mismo flujo de debouncing + advisory lock
-  que en Fase 3.
+  Same debouncing + advisory lock flow
+  as in Phase 3.
 end note
 
-BUS -> ORC : Entrega evento agrupado
+BUS -> ORC : Delivers grouped event
 ORC -> CLAS : classify_intent(latest_reply)
-CLAS -> LLM : Clasifica
+CLAS -> LLM : Classifies
 LLM --> CLAS : intent = meeting_intent
 CLAS --> ORC : route -> Scheduler
 
 ORC -> SCH : run(conversation_id)
-SCH -> CA : Consulta disponibilidad en Calendar
-CA --> SCH : Slots disponibles
-SCH -> LLM : Genera propuesta natural (modelo premium)
-LLM --> SCH : "Te va martes 10am o jueves 4pm?"
-SCH --> ORC : propuesta + slots
+SCH -> CA : Queries Calendar availability
+CA --> SCH : Available slots
+SCH -> LLM : Generates natural proposal (premium model)
+LLM --> SCH : "Does Tuesday 10am or Thursday 4pm work?"
+SCH --> ORC : proposal + slots
 
-ORC -> EVAL : evaluate(propuesta)
-EVAL --> ORC : APROBADO
-ORC -> CA : send(propuesta)
-CA -> P : Envia opciones
-P -> CA : Confirma martes 10am
-CA -> BUS : Publica meeting.confirmed
-BUS -> SCH : Procesa confirmacion
-SCH -> CA : Crea evento en Calendar
-SCH -> DB : Actualiza conversacion (status = scheduled)
-SCH -> SR : Notifica via Slack "Reunion agendada"
+ORC -> EVAL : evaluate(proposal)
+EVAL --> ORC : APPROVED
+ORC -> CA : send(proposal)
+CA -> P : Sends options
+P -> CA : Confirms Tuesday 10am
+CA -> BUS : Publishes meeting.confirmed
+BUS -> SCH : Processes confirmation
+SCH -> CA : Creates event in Calendar
+SCH -> DB : Updates conversation (status = scheduled)
+SCH -> SR : Notifies via Slack "Meeting booked"
 
 note over P, SR
-  Metricas capturadas en agent_runs:
-  cost_per_meeting, latencia por etapa,
-  tasa de aprobacion del Evaluator, tasa de
-  handoff por intent, fuente del lead.
+  Metrics captured in agent_runs:
+  cost_per_meeting, latency per stage,
+  Evaluator approval rate, handoff rate
+  by intent, lead source.
 end note
 
 @enduml
 ```
 
-**Notas sobre el diagrama:**
+**Notes on the diagram:**
 
-- **Fase 1 corre en background** al ingerir el lead, no en cada respuesta. Esto desacopla la latencia de investigación del tiempo de respuesta percibido por el prospect.
-- **El debouncing convierte la latencia en feature de humanización.** Un humano no responde en 2 segundos a un DM.
-- **Las dos puertas (Intent Classifier + Confidence Gate) son independientes.** La primera filtra qué intentar; la segunda valida lo intentado.
-- **El advisory lock garantiza serialización por lead** aún si múltiples workers consumen del bus.
+- **Phase 1 runs in the background** when the lead is ingested, not on every reply. This decouples research latency from the prospect's perceived response time.
+- **Debouncing turns latency into a humanization feature.** A human doesn't reply to a LinkedIn DM in 2 seconds.
+- **The two gates (Intent Classifier + Confidence Gate) are independent.** The first filters what to attempt; the second validates what was attempted.
+- **The advisory lock guarantees serialization per lead** even if multiple workers consume from the bus.
 
 ---
 
-## 8. Máquina de estados — Conversation lifecycle
+## 8. State machine — Conversation lifecycle
 
 ```plantuml
 @startuml State_Conversation_Zolvo
-title Maquina de estados - Conversation lifecycle
+title State machine - Conversation lifecycle
 
 skinparam state {
   BackgroundColor #F5F5F5
@@ -566,91 +566,91 @@ skinparam state {
 [*] --> researching : lead.created
 
 state researching {
-  researching : Researcher enriquece perfil
-  researching : Genera embedding del lead
-  researching : Persiste en lead_embeddings
+  researching : Researcher enriches profile
+  researching : Generates lead embedding
+  researching : Persists to lead_embeddings
 }
 
 researching --> engaging : enrichment.completed
-researching --> failed : enrichment.failed\n(3 retries agotados)
+researching --> failed : enrichment.failed\n(3 retries exhausted)
 
 state engaging {
-  engaging : Copywriter genera mensaje inicial
-  engaging : Evaluator aprueba (confidence >= umbral)
-  engaging : Channel Adapter envia
-  engaging : Esperando primera respuesta
+  engaging : Copywriter generates initial message
+  engaging : Evaluator approves (confidence >= threshold)
+  engaging : Channel Adapter sends
+  engaging : Waiting for first reply
 }
 
 engaging --> conversing : reply.received
-engaging --> awaiting_human : confidence_score < umbral
-engaging --> dormant : no_reply (timeout configurable)
+engaging --> awaiting_human : confidence_score < threshold
+engaging --> dormant : no_reply (configurable timeout)
 
 state conversing {
-  conversing : Conversationalist mantiene thread
-  conversing : Memoria contextual activa (pgvector)
-  conversing : Cada turno pasa por Confidence Gate
+  conversing : Conversationalist maintains thread
+  conversing : Active contextual memory (pgvector)
+  conversing : Each turn passes through Confidence Gate
 }
 
 conversing --> negotiating : objection_detected
 conversing --> scheduling : meeting_intent_detected
-conversing --> awaiting_human : confidence_score < umbral
+conversing --> awaiting_human : confidence_score < threshold
 conversing --> dormant : no_reply (timeout)
-conversing --> lost : prospect_opt_out\n(explicito o implicito)
+conversing --> lost : prospect_opt_out\n(explicit or implicit)
 
 state negotiating {
-  negotiating : Objection Handler activo
-  negotiating : Casos previos exitosos como contexto
-  negotiating : Trazabilidad de objeciones por tipo
+  negotiating : Objection Handler active
+  negotiating : Previous successful cases as context
+  negotiating : Objection traceability by type
 }
 
 negotiating --> conversing : objection_resolved
 negotiating --> scheduling : meeting_intent_detected
-negotiating --> lost : objection_terminal\n(precio, autoridad, fit)
+negotiating --> lost : terminal_objection\n(price, authority, fit)
 negotiating --> awaiting_human : escalation_required
 
 state scheduling {
-  scheduling : Scheduler consulta calendar
-  scheduling : Propone slots naturales
-  scheduling : Espera confirmacion del prospect
+  scheduling : Scheduler queries calendar
+  scheduling : Proposes natural slots
+  scheduling : Waiting for prospect confirmation
 }
 
 scheduling --> scheduled : slot_confirmed
 scheduling --> conversing : prospect_reconsiders
-scheduling --> awaiting_human : conflicto_calendario
+scheduling --> awaiting_human : calendar_conflict
 
 state awaiting_human {
-  awaiting_human : Pausa automatizacion
-  awaiting_human : Notifica a sales rep en Slack
-  awaiting_human : Contexto completo adjunto
+  awaiting_human : Automation paused
+  awaiting_human : Notifies sales rep in Slack
+  awaiting_human : Full context attached
 }
 
-awaiting_human --> conversing : human_approved\n(rep retoma o aprueba draft)
+awaiting_human --> conversing : human_approved\n(rep resumes or approves draft)
 awaiting_human --> lost : human_marked_lost
 
 state dormant {
-  dormant : Sin actividad reciente
-  dormant : Re-engagement programado
-  dormant : Maximo 2 reintentos espaciados
+  dormant : No recent activity
+  dormant : Re-engagement scheduled
+  dormant : Maximum 2 spaced retries
 }
 
 dormant --> conversing : reply.received
 dormant --> lost : re_engagement_exhausted
 
-scheduled --> [*] : Reunion en calendar\nHandoff a sales rep
-lost --> [*] : Cerrado con razon\n(loss_reason persistido)
-failed --> [*] : Error tecnico\n(notificacion al equipo)
+scheduled --> [*] : Meeting in calendar\nHandoff to sales rep
+lost --> [*] : Closed with reason\n(loss_reason persisted)
+failed --> [*] : Technical error\n(team notification)
 
 note right of awaiting_human
-  Este estado materializa el "20% humano"
-  del brief: 80% automatizado + 20% con
-  criterio humano cuando el sistema duda.
+  This state materializes the "20% human"
+  from the brief: 80% automated + 20% with
+  human judgment when the system is uncertain.
 end note
 
 note bottom of dormant
-  Diseno deliberado: no quemar leads
-  con re-engagement agresivo. Mejor
-  ROI a largo plazo que conversion
-  forzada a corto plazo.
+  Deliberate design: don't burn leads
+  with aggressive re-engagement. Better
+  long-term ROI than forced short-term
+  conversion.
 end note
 
 @enduml
@@ -658,13 +658,13 @@ end note
 
 ---
 
-## 9. Modelo de datos (Supabase)
+## 9. Data model (Supabase)
 
-### 9.1 Tablas core
+### 9.1 Core tables
 
 ```sql
--- Multi-tenancy: tenant_id en todas las tablas operacionales
--- RLS habilitado en todas las tablas
+-- Multi-tenancy: tenant_id on all operational tables
+-- RLS enabled on all tables
 
 leads
   id              uuid PK
@@ -675,16 +675,16 @@ leads
   linkedin_url    text
   company         text
   role            text
-  enriched_data   jsonb         -- output del Researcher
-  status          text          -- ver maquina de estados
+  enriched_data   jsonb         -- Researcher output
+  status          text          -- see state machine
   created_at      timestamptz
-  owner_id        uuid          -- sales rep asignado
+  owner_id        uuid          -- assigned sales rep
 
 lead_embeddings
   lead_id         uuid FK
   tenant_id       uuid FK
   embedding       vector(1536)
-  source_text     text          -- texto del que se genero el embedding
+  source_text     text          -- text from which the embedding was generated
   model_used      text          -- text-embedding-3-small, etc.
   created_at      timestamptz
 
@@ -692,9 +692,9 @@ conversation_summaries_embeddings
   conversation_id   uuid FK
   tenant_id         uuid FK
   embedding         vector(1536)
-  summary_text      text          -- resumen denso generado al cerrar la conversacion
+  summary_text      text          -- dense summary generated when closing the conversation
   outcome           text          -- scheduled | lost | dormant
-  loss_reason       text          -- NULL si outcome != lost
+  loss_reason       text          -- NULL if outcome != lost
   model_used        text
   created_at        timestamptz
 
@@ -706,7 +706,7 @@ conversations
   started_at      timestamptz
   status          text          -- researching, engaging, conversing, ...
   current_stage   text
-  loss_reason     text          -- NULL si no esta en estado lost
+  loss_reason     text          -- NULL if not in lost state
 
 messages
   id                    uuid PK
@@ -733,131 +733,131 @@ agent_runs
   tokens_out        integer
   cost_usd          numeric(10,6)
   latency_ms        integer
-  decision_trace    jsonb         -- razonamiento del agente, util para debugging
+  decision_trace    jsonb         -- agent reasoning, useful for debugging
   created_at        timestamptz
 
 events_outbox
   id              uuid PK
   tenant_id       uuid FK
-  aggregate_id    uuid          -- lead_id o conversation_id
+  aggregate_id    uuid          -- lead_id or conversation_id
   event_type      text          -- lead.created, message.sent, etc.
   payload         jsonb
-  published_at    timestamptz   -- NULL si aun no publicado
+  published_at    timestamptz   -- NULL if not yet published
   attempts        integer
 ```
 
-### 9.2 Decisiones del modelo
+### 9.2 Model decisions
 
-- **`agent_runs` es la tabla de observabilidad pura.** Cada decisión de cada agente queda auditable con costo y latencia. `cost_per_meeting_booked` se calcula con una query agregada.
-- **`lead_embeddings` separada de `leads`** por separación de responsabilidades: regenerar embeddings no debe tocar el resto del registro.
-- **`conversation_summaries_embeddings` materializa la memoria de largo plazo** del ADR-07. Se genera al cerrar la conversación, no en cada turno. Habilita RAG sobre casos pasados ("¿cómo se resolvieron objeciones de precio en fintech mexicana?").
-- **`confidence_score` y `human_reviewed`** materializan el Confidence Gate del ADR-04.
-- **`loss_reason` siempre persistido** cuando una conversación termina en `lost`. Sin esto no hay aprendizaje agregado.
-- **`events_outbox`** habilita el patrón outbox del ADR-03.
-- **`decision_trace`** captura el razonamiento del agente para debugging y eventual fine-tuning.
+- **`agent_runs` is the pure observability table.** Every decision of every agent is auditable with cost and latency. `cost_per_meeting_booked` is computed with a single aggregated query.
+- **`lead_embeddings` separated from `leads`** by separation of concerns: regenerating embeddings should not touch the rest of the record.
+- **`conversation_summaries_embeddings` materializes the long-term memory** from ADR-07. Generated when closing the conversation, not on every turn. Enables RAG over past cases ("how were price objections resolved in Mexican fintech?").
+- **`confidence_score` and `human_reviewed`** materialize the Confidence Gate from ADR-04.
+- **`loss_reason` always persisted** when a conversation ends in `lost`. Without this there is no aggregate learning.
+- **`events_outbox`** enables the outbox pattern from ADR-03.
+- **`decision_trace`** captures agent reasoning for debugging and eventual fine-tuning.
 
 ---
 
-## 10. Stack tecnológico
+## 10. Technology stack
 
-| Capa | Tecnología | Justificación |
+| Layer | Technology | Justification |
 |---|---|---|
-| Orquestación visible | n8n | Cumplimiento explícito del brief, visibilidad para sales rep |
-| Lógica de agentes | Python + FastAPI | Ecosistema LLM más maduro, tipado con Pydantic, async nativo |
-| Base de datos | Supabase Postgres + pgvector | Cumplimiento del brief, RLS nativo, realtime, embeddings sin servicio extra |
-| Acceso a datos | supabase-py async (REST/HTTPS) | Host directo Postgres es solo IPv6 en entorno WSL2; supabase-py usa CloudFlare IPv4 sin cambios de arquitectura lógica |
-| LLM providers | OpenRouter (default), Anthropic, OpenAI, Ollama Cloud | Strategy pattern; agnóstico; OpenRouter como gateway unificado y más barato para el demo |
-| Canales | LinkedIn, Gmail/Outlook, Google Calendar | Estándar de outbound B2B |
-| Observabilidad | OpenTelemetry + logs estructurados | Estándar, agnóstico a vendor |
-| Notificaciones | Slack webhooks | Habitual en equipos B2B |
-| Despliegue | Local · FastAPI en `localhost:8000` + n8n self-hosted en `n8n.stivenyepes.com` + Supabase Cloud | Demo en máquina local; n8n ya desplegado en el mismo host |
-| CI/CD | GitHub Actions | Estándar |
+| Visible orchestration | n8n | Explicit brief compliance, visibility for sales rep |
+| Agent logic | Python + FastAPI | Most mature LLM ecosystem, typed with Pydantic, native async |
+| Database | Supabase Postgres + pgvector | Brief compliance, native RLS, realtime, embeddings without extra service |
+| Data access | supabase-py async (REST/HTTPS) | Direct Postgres host is IPv6-only in WSL2; supabase-py uses CloudFlare IPv4 without changing logical architecture |
+| LLM providers | OpenRouter (default), Anthropic, OpenAI, Ollama | Strategy pattern; agnostic; OpenRouter as unified, cheaper gateway for the demo |
+| Channels | LinkedIn, Gmail/Outlook, Google Calendar | Standard B2B outbound |
+| Observability | OpenTelemetry + structured logs | Standard, vendor-agnostic |
+| Notifications | Slack webhooks | Common in B2B teams |
+| Deployment | Local · FastAPI on `localhost:8000` + n8n self-hosted on `n8n.stivenyepes.com` + Supabase Cloud | Demo on local machine; n8n already deployed on the same host |
+| CI/CD | GitHub Actions | Standard |
 
 ---
 
-## 11. Mapeo: atributos → ROI
+## 11. Attribute-to-ROI mapping
 
-| Decisión de diseño | Métrica de ROI que habilita |
+| Design decision | ROI metric it enables |
 |---|---|
-| Strategy pattern + routing por costo (ADR-02) | `cost_per_lead`, `cost_per_meeting`, ahorro estimado 60-70% vs. modelo premium uniforme |
-| `agent_runs` con costo/latencia (Sec. 9) | Atribución precisa de gasto por etapa del funnel |
-| Intent Classifier (ADR-04, Puerta 1) | `pct_messages_handed_off_by_intent` → previene quemar leads por respuestas inadecuadas |
-| Confidence Gate (ADR-04, Puerta 2) | `pct_messages_auto_approved` → mide nivel real de automatización |
-| Debouncing + advisory lock (ADR-06) | `messages_per_turn_avg` → evita N llamadas LLM cuando 1 basta; mejora naturalidad |
-| Memoria dual (ADR-07) | `context_retrieval_hit_rate` → mide cuándo el RAG aporta valor real |
-| Estado `awaiting_human` explícito (Sec. 8) | `human_intervention_rate` → cuánto del 20% se está usando |
-| `loss_reason` persistido (Sec. 9) | Análisis agregado de objeciones → mejora del ICP y copy |
-| Event-driven async (ADR-03) | `leads_processed_per_hour` sin tocar código |
+| Strategy pattern + cost routing (ADR-02) | `cost_per_lead`, `cost_per_meeting`, estimated 60-70% savings vs. uniform premium model |
+| `agent_runs` with cost/latency (Sec. 9) | Precise spend attribution per funnel stage |
+| Intent Classifier (ADR-04, Gate 1) | `pct_messages_handed_off_by_intent` → prevents burning leads through inappropriate responses |
+| Confidence Gate (ADR-04, Gate 2) | `pct_messages_auto_approved` → measures real automation level |
+| Debouncing + advisory lock (ADR-06) | `messages_per_turn_avg` → avoids N LLM calls when 1 suffices; improves naturalness |
+| Dual memory (ADR-07) | `context_retrieval_hit_rate` → measures when RAG adds real value |
+| Explicit `awaiting_human` state (Sec. 8) | `human_intervention_rate` → how much of the 20% is being used |
+| `loss_reason` persisted (Sec. 9) | Aggregate objection analysis → ICP and copy improvement |
+| Event-driven async (ADR-03) | `leads_processed_per_hour` without touching code |
 
-**Fórmula ROI propuesta para el cliente final:**
+**Proposed ROI formula for the end customer:**
 
 ```
-ROI = (meetings_booked × valor_promedio_meeting - costo_total_sistema)
-       / costo_total_sistema
+ROI = (meetings_booked × avg_meeting_value - total_system_cost)
+       / total_system_cost
 
-costo_total_sistema = sum(agent_runs.cost_usd) + costo_infra + costo_humano_residual
+total_system_cost = sum(agent_runs.cost_usd) + infra_cost + residual_human_cost
 ```
 
-Esta fórmula es defendible porque cada variable se mide desde la base de datos, no se estima.
+This formula is defensible because every variable is measured from the database, not estimated.
 
 ---
 
-## 12. Estado de implementación del prototipo
+## 12. Prototype implementation status
 
-### Implementado (Hitos 0-12 completados)
+### Implemented (Milestones 0-12 completed)
 
-- ✅ **[Hito 0]** Estructura del proyecto Python, CI (ruff + pytest), Supabase schema + RLS
-- ✅ **[Hito 1]** LLM Gateway con Strategy pattern — 4 proveedores (OpenRouter, Anthropic, OpenAI, FakeLLMProvider)
-- ✅ **[Hito 2]** Modelo de datos y repositorios con RLS multi-tenant (supabase-py async)
-- ✅ **[Hito 3]** Researcher Agent — enrichment ICP + embedding pgvector
-- ✅ **[Hito 4]** Copywriter Agent — mensaje outbound personalizado (subject + body JSON)
-- ✅ **[Hito 5]** Intent Classifier — 9 categorías, handoff automático, persiste en `agent_runs`
-- ✅ **[Hito 6]** Memory Service — short-term textual (últimos 15 msgs) + long-term pgvector
-- ✅ **[Hito 7]** Conversationalist Agent — multi-turn con memoria dual, adapta tono por intent
-- ✅ **[Hito 8]** Evaluator / Confidence Gate — score = (naturalidad + relevancia + (1−riesgo)) / 3
-- ✅ **[Hito 9]** Orchestrator — pipeline coordinado dos puertas, persiste agent_run de intent_classifier
-- ✅ **[Hito 10]** FastAPI endpoints completos + 2 workflows n8n activos
-- ✅ **[Hito 11]** Demo end-to-end funcional — lead Diego Ramírez (CTO @ CredIMex), 3 turnos
-- ✅ **[Hito 12]** Polish para el video:
+- ✅ **[Milestone 0]** Python project structure, CI (ruff + pytest), Supabase schema + RLS
+- ✅ **[Milestone 1]** LLM Gateway with Strategy pattern — 4 providers (OpenRouter, Anthropic, OpenAI, FakeLLMProvider)
+- ✅ **[Milestone 2]** Data model and repositories with RLS multi-tenant (supabase-py async)
+- ✅ **[Milestone 3]** Researcher Agent — ICP enrichment + pgvector embedding
+- ✅ **[Milestone 4]** Copywriter Agent — personalized outbound message (subject + body JSON)
+- ✅ **[Milestone 5]** Intent Classifier — 9 categories, automatic handoff, persists to `agent_runs`
+- ✅ **[Milestone 6]** Memory Service — short-term textual (last 15 messages) + long-term pgvector
+- ✅ **[Milestone 7]** Conversationalist Agent — multi-turn with dual memory, adapts tone by intent
+- ✅ **[Milestone 8]** Evaluator / Confidence Gate — score = (naturalness + relevance + (1−risk)) / 3
+- ✅ **[Milestone 9]** Orchestrator — coordinated two-gate pipeline, persists intent_classifier agent_run
+- ✅ **[Milestone 10]** Complete FastAPI endpoints + 2 active n8n workflows
+- ✅ **[Milestone 11]** Functional end-to-end demo — lead Diego Ramírez (CTO @ CredIMex), 3 turns
+- ✅ **[Milestone 12]** Video polish:
   - `ChannelAdapter` ABC + `LinkedInMockAdapter` + `EmailMockAdapter` (logs via structlog)
-  - `SlackStub` — `notify_handoff()` / `notify_escalation()` visibles en Terminal 1
-  - `GET /operator/dashboard` — métricas del pipeline en tiempo real
-  - `demo/run_happy_path.py` — rich UI con prospect view + operator dashboard
-  - `demo/metrics.sql` — 4 queries para Supabase SQL Editor
+  - `SlackStub` — `notify_handoff()` / `notify_escalation()` visible in Terminal 1
+  - `GET /operator/dashboard` — real-time pipeline metrics
+  - `demo/run_happy_path.py` — rich UI with prospect view + operator dashboard
+  - `demo/metrics.sql` — 4 queries for Supabase SQL Editor
 
-### Fuera de alcance del prototipo (documentado, no implementado)
+### Out of scope for the prototype (documented, not implemented)
 
-- **Integración real con LinkedIn API** — simulada con `LinkedInMockAdapter` que loguea `channel.linkedin.send`
-- **Integración real con Slack** — simulada con `SlackStub` que loguea `slack.handoff_alert` / `slack.escalation_alert`
-- **Objection Handler especializado** — cubierto por Conversationalist en el prototipo
-- **Re-engagement automatizado del estado `dormant`** — estado definido en la máquina de estados, no implementado
-- **Debouncing real** — en producción requiere worker con timer reset; no implementado en el prototipo
-- **Advisory locks bajo contención real** — single-worker en el prototipo
-- **Demo con múltiples tenants simultáneos** — el diseño RLS multi-tenant sí está implementado; la demo usa un solo tenant
+- **Real LinkedIn API integration** — simulated with `LinkedInMockAdapter` logging `channel.linkedin.send`
+- **Real Slack integration** — simulated with `SlackStub` logging `slack.handoff_alert` / `slack.escalation_alert`
+- **Specialized Objection Handler** — covered by Conversationalist in the prototype
+- **Automated re-engagement of `dormant` state** — state defined in the state machine, not implemented
+- **Real debouncing** — in production requires a worker with timer reset; not implemented in the prototype
+- **Advisory locks under real contention** — single-worker in the prototype
+- **Demo with multiple simultaneous tenants** — the RLS multi-tenant design is implemented; the demo uses a single tenant
 
-### Decisiones de implementación que difieren del diseño original
+### Implementation decisions that differ from the original design
 
-| Componente | Diseño original | Implementación real | Razón |
+| Component | Original design | Actual implementation | Reason |
 |---|---|---|---|
-| Acceso a DB | SQLAlchemy + asyncpg | supabase-py async (REST/HTTPS) | DB host directo solo IPv6 en WSL2; supabase-py usa CloudFlare IPv4 |
-| LLM providers | OpenAI + Anthropic como principales | OpenRouter como default | Más barato para el demo; cubre múltiples modelos con una key |
-| Canales | LinkedIn/Email/Calendar reales | Mocks con structlog | App de LinkedIn requiere aprobación; OAuth fuera del alcance del prototipo |
-| Slack | Webhook real | SlackStub con log.warning | Sin credenciales; el log es suficiente para la demo visual |
-| Debouncing | 30-90s jitter + timer reset | Sin implementar | Prototipo: procesamiento inmediato; no afecta la demo |
+| DB access | SQLAlchemy + asyncpg | supabase-py async (REST/HTTPS) | DB direct host is IPv6-only in WSL2; supabase-py uses CloudFlare IPv4 |
+| LLM providers | OpenAI + Anthropic as primary | OpenRouter as default | Cheaper for the demo; covers multiple models with one key |
+| Channels | Real LinkedIn/Email/Calendar | Mocks with structlog | LinkedIn App requires approval; OAuth out of prototype scope |
+| Slack | Real webhook | SlackStub with log.warning | No credentials; the log is sufficient for the visual demo |
+| Debouncing | 30-90s jitter + timer reset | 3-7s for demo recordability | Prototype: immediate processing; does not affect the demo flow |
 
 ---
 
-## Apéndice — Glosario
+## Appendix — Glossary
 
-| Término | Significado |
+| Term | Meaning |
 |---|---|
-| ICP | Ideal Customer Profile — definición del cliente ideal |
-| RAG | Retrieval-Augmented Generation — generación con contexto recuperado |
-| RLS | Row-Level Security — políticas de seguridad a nivel de fila en Postgres |
-| DLQ | Dead Letter Queue — cola para mensajes que fallaron tras N reintentos |
-| LFPDPPP | Ley Federal de Protección de Datos Personales en Posesión de los Particulares (México) |
-| GDPR | General Data Protection Regulation (Europa) |
-| LTV | Lifetime Value — valor total estimado de un cliente |
-| CAC | Customer Acquisition Cost — costo de adquirir un cliente |
-| C4 | Modelo de Simon Brown para diagramar arquitecturas de software |
-| ADR | Architecture Decision Record — registro de una decisión arquitectónica |
+| ICP | Ideal Customer Profile — definition of the ideal customer |
+| RAG | Retrieval-Augmented Generation — generation with retrieved context |
+| RLS | Row-Level Security — row-level security policies in Postgres |
+| DLQ | Dead Letter Queue — queue for messages that failed after N retries |
+| LFPDPPP | Ley Federal de Protección de Datos Personales en Posesión de los Particulares (Mexico data protection law) |
+| GDPR | General Data Protection Regulation (Europe) |
+| LTV | Lifetime Value — estimated total value of a customer |
+| CAC | Customer Acquisition Cost — cost to acquire a customer |
+| C4 | Simon Brown's model for diagramming software architectures |
+| ADR | Architecture Decision Record — record of an architectural decision |

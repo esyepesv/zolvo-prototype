@@ -1,475 +1,441 @@
-# LIMITATIONS.md — Brechas entre diseño y prototipo
+# LIMITATIONS.md — Gaps between design and prototype
 
-> Este documento existe porque la honestidad técnica vale más que la apariencia de completitud. El sistema descrito en `docs/arquitectura-zolvo.md` es el diseño objetivo. Este prototipo cubre lo esencial del happy path en 48 horas, con trade-offs deliberados que se enumeran aquí.
+> This document exists because technical honesty is worth more than the appearance of completeness. The system described in `docs/arquitectura-zolvo.md` is the target design. This prototype covers the essential happy path in 48 hours, with deliberate trade-offs listed here.
 
-**Audiencia:** evaluadores técnicos y futuros mantenedores. Si vas a revisar el código contra el diseño, lee esto primero.
+**Audience:** technical reviewers and future maintainers. If you plan to compare the code against the design, read this first.
 
 ---
 
-## 1. Resumen ejecutivo
+## 1. Executive summary
 
-| Componente del diseño | Estado en el prototipo | Severidad |
+| Design component | Status in prototype | Severity |
 |---|---|---|
-| Strategy pattern para LLMs | ✅ Implementado completo (4 providers) | — |
-| Multi-tenant con RLS | ✅ Implementado completo | — |
-| Intent Classifier (Puerta 1) | ✅ Implementado completo | — |
-| Confidence Gate (Puerta 2) | ✅ Implementado completo | — |
-| Memoria dual (textual + pgvector) | ✅ Implementado completo | — |
-| Observabilidad (`agent_runs`) | ✅ Implementado completo | — |
-| Dashboard del operador | ✅ Implementado completo | — |
-| Researcher Agent | ⚠️ Implementado sin fuentes externas | Media |
-| Conversationalist (multi-turn) | ✅ Implementado completo | — |
-| Scheduler Agent | ❌ Absorbido por Conversationalist | **Alta** |
-| Debouncing + Advisory Lock (ADR-06) | ✅ Implementado (jitter async + in-memory lock) | — |
-| Event Bus async (ADR-03) | ❌ Reemplazado por HTTP síncrono | Media |
-| Circuit breaker (ADR-01) | ✅ Implementado (in-memory, per-provider) | — |
-| Re-engagement de leads `dormant` | ❌ Estado definido, no automatizado | Baja |
-| Objection Handler especializado | ❌ Absorbido por Conversationalist | Baja |
-| Canales reales (LinkedIn/Email/Calendar) | ❌ Mocks con logs estructurados | Por diseño |
-| Slack real | ❌ Stub con `log.warning` | Por diseño |
+| Strategy pattern for LLMs | ✅ Fully implemented (4 providers) | — |
+| Multi-tenant with RLS | ✅ Fully implemented | — |
+| Intent Classifier (Gate 1) | ✅ Fully implemented | — |
+| Confidence Gate (Gate 2) | ✅ Fully implemented | — |
+| Dual memory (textual + pgvector) | ✅ Fully implemented | — |
+| Observability (`agent_runs`) | ✅ Fully implemented | — |
+| Operator dashboard | ✅ Fully implemented | — |
+| Researcher Agent | ⚠️ Implemented without external sources | Medium |
+| Conversationalist (multi-turn) | ✅ Fully implemented | — |
+| Scheduler Agent | ❌ Absorbed by Conversationalist | **High** |
+| Debouncing + Advisory Lock (ADR-06) | ✅ Implemented (async jitter + in-memory lock) | — |
+| Async Event Bus (ADR-03) | ❌ Replaced by synchronous HTTP | Medium |
+| Circuit breaker (ADR-01) | ✅ Implemented (in-memory, per-provider) | — |
+| Re-engagement of `dormant` leads | ❌ State defined, not automated | Low |
+| Specialized Objection Handler | ❌ Absorbed by Conversationalist | Low |
+| Real channels (LinkedIn/Email/Calendar) | ❌ Mocks with structured logs | By design |
+| Real Slack | ❌ Stub with `log.warning` | By design |
 
 ---
 
-## 2. Brechas de alta severidad
+## 2. High-severity gaps
 
-### 2.1 Debouncing + Advisory Lock (ADR-06) — implementado ✅
+### 2.1 Debouncing + Advisory Lock (ADR-06) — implemented ✅
 
-**Lo que dice el diseño:** ADR-06 argumenta que el debouncing (30–90s con jitter) y el `pg_advisory_xact_lock(lead_id)` son los mecanismos que convierten la latencia en feature de humanización y eliminan race conditions en mensajes concurrentes del mismo lead.
+**What the design says:** ADR-06 argues that debouncing (30–90s with jitter) and `pg_advisory_xact_lock(lead_id)` are the mechanisms that turn latency into a humanization feature and eliminate race conditions on concurrent messages from the same lead.
 
-**Lo que hace el código:**
-- `POST /events/reply` persiste el mensaje inbound inmediatamente (antes del lock).
-- Adquiere un `asyncio.Lock` por `conversation_id` (módulo-level dict `_conv_locks`).
-- Dentro del lock: `asyncio.sleep(random.uniform(debounce_min, debounce_max))` con log estructurado.
-- El pipeline completo y el routing de canal corren dentro del lock — imposible procesar la misma conversación en paralelo en un solo proceso.
+**What the code does:**
+- `POST /events/reply` persists the inbound message immediately (before acquiring the lock).
+- Acquires an `asyncio.Lock` per `conversation_id` (module-level dict `_conv_locks`).
+- Inside the lock: `asyncio.sleep(random.uniform(debounce_min, debounce_max))` with structured logging.
+- The full pipeline and channel routing run inside the lock — processing the same conversation in parallel within a single process is impossible.
 
-**Limitación de producción:** `asyncio.Lock` es in-memory y single-process. En un deployment multi-worker (Gunicorn con varios workers), dos workers pueden adquirir locks distintos para el mismo `conversation_id`. Para multi-worker se necesita `pg_advisory_xact_lock` o Redis Distributed Lock (Redlock). En el prototipo single-worker con uvicorn, el lock es suficiente.
-
----
-
-### 2.2 Scheduler Agent — absorbido por Conversationalist
-
-**Lo que dice el diseño:** el C4 L3 muestra un `Scheduler Agent` como componente independiente con Strategy pattern. El diagrama de secuencia (Fase 4) detalla cómo el Scheduler consulta Calendar, propone slots naturales, espera confirmación, crea evento y notifica.
-
-**Lo que hace el código:** cuando el Intent Classifier detecta `meeting_intent`, el flujo va al `ConversationalistAgent` con una guía de prompt específica en `_INTENT_GUIDANCE["meeting_intent"]` que le pide proponer 2-3 horarios. **No hay creación real de evento en Calendar.** En n8n existe un nodo "Google Calendar — Crear Evento" detrás de un `IF intent == meeting_intent`, pero el endpoint apunta a `googleapis.com/calendar/v3` sin OAuth configurado — el nodo está como blueprint, no ejecuta.
-
-**Por qué se dejó así:**
-- Crear un agente Python aparte por una guía de prompt aplicada al mismo LLM no aporta valor real: sería duplicación con otro nombre.
-- La integración real con Google Calendar requiere OAuth + credentials de Google Workspace, fuera del alcance de un prototipo de 48h.
-- La detección de slots disponibles, parseo de confirmación del prospect y creación de evento son **3 sub-features distintos**, cada uno con su propia complejidad.
-
-**Impacto real:**
-- En el demo, el sistema "responde como si fuera a agendar" pero **no agenda nada**. El brief pide "book meetings".
-- Es la brecha más visible si el evaluador hace el demo manualmente y verifica calendar.
-
-**Qué requiere para producción:**
-1. `SchedulerAgent` como Strategy con dependencias inyectadas: `CalendarAdapter`, `LLMGateway`, `MemoryService`
-2. `CalendarAdapter` con implementaciones reales (`GoogleCalendarAdapter`, `OutlookAdapter`) + mock para tests
-3. Parser de intent secundario: "user confirmed slot X" vs "user proposed alternative" vs "user backed out"
-4. Estado `scheduling` activo en la máquina de estados (ya definido en `docs/arquitectura-zolvo.md` §8)
-5. Workflow en n8n con OAuth de Google Calendar y envío de `.ics`
-
-**Estimación:** 8-12h de desarrollo para un Scheduler funcional sin canales reales; +15h para integraciones OAuth en producción.
+**Production limitation:** `asyncio.Lock` is in-memory and single-process. In a multi-worker deployment (Gunicorn with multiple workers), two workers can acquire separate locks for the same `conversation_id`. For multi-worker, `pg_advisory_xact_lock` or Redis Distributed Lock (Redlock) is required. In the single-worker uvicorn prototype, the lock is sufficient.
 
 ---
 
-## 3. Brechas de severidad media
+### 2.2 Scheduler Agent — absorbed by Conversationalist
 
-### 3.1 Event Bus async (ADR-03) — reemplazado por HTTP síncrono
+**What the design says:** the C4 L3 diagram shows a `Scheduler Agent` as an independent component with Strategy pattern. The sequence diagram (Phase 4) details how the Scheduler queries Calendar, proposes natural slots, awaits confirmation, creates the event, and notifies.
 
-**Diseño:** Supabase Realtime + outbox pattern. Eventos `lead.created`, `reply.received`, `message.sent` publicados asincrónicamente. Workers suscriptos los consumen sin bloqueo.
+**What the code does:** when the Intent Classifier detects `meeting_intent`, the flow goes to `ConversationalistAgent` with a specific prompt guide in `_INTENT_GUIDANCE["meeting_intent"]` that asks it to propose 2-3 time slots. **There is no real Calendar event creation.** In n8n there is a "Google Calendar — Create Event" node behind an `IF intent == meeting_intent` condition, but the endpoint points to `googleapis.com/calendar/v3` without configured OAuth — the node is a blueprint, not functional.
 
-**Código:** la API recibe HTTP, ejecuta el pipeline completo en el mismo request, responde con el resultado. La tabla `events_outbox` está en migrations pero **ninguna escritura la usa**.
+**Why it was left this way:**
+- Creating a separate Python agent for a prompt guide applied to the same LLM adds no real value: it would be duplication under a different name.
+- Real Google Calendar integration requires OAuth + Google Workspace credentials, out of scope for a 48-hour prototype.
+- Available slot detection, confirmation parsing, and event creation are **3 distinct sub-features**, each with its own complexity.
 
-**Por qué:** un demo síncrono es más fácil de mostrar en video. El `POST /events/reply` retorna `{intent, action, confidence}` en la respuesta, lo cual es ideal para grabar logs en tiempo real. Hacerlo async habría requerido un consumidor de eventos corriendo aparte y un mecanismo de polling/SSE para que el demo viera el resultado.
+**Real impact:**
+- In the demo, the system "responds as if it's going to schedule" but **schedules nothing**. The brief asks to "book meetings."
+- This is the most visible gap if the reviewer runs the demo manually and checks Calendar.
 
-**Trade-off honesto:**
-- ✅ Demo más visible y debuggeable
-- ❌ Latencia bloqueante en el request del prospect (en producción real, LinkedIn no espera 8 segundos)
-- ❌ Sin backpressure cuando entren picos de mensajes
-- ❌ `events_outbox` definido pero inútil
+**What production requires:**
+1. `SchedulerAgent` as Strategy with injected dependencies: `CalendarAdapter`, `LLMGateway`, `MemoryService`
+2. `CalendarAdapter` with real implementations (`GoogleCalendarAdapter`, `OutlookAdapter`) + mock for tests
+3. Secondary intent parser: "user confirmed slot X" vs. "user proposed alternative" vs. "user backed out"
+4. Active `scheduling` state in the state machine (already defined in `docs/arquitectura-zolvo.md §8`)
+5. n8n workflow with Google Calendar OAuth and `.ics` delivery
 
-**Qué requiere para producción:**
-- Worker async consumiendo de Supabase Realtime (canal por tipo de evento)
-- `events_outbox` escrito en la misma transacción que los cambios de estado
-- Publisher worker que lee `events_outbox` y emite a Realtime con dedupe por `id`
-- Retry policy con DLQ para eventos que fallan 3 veces
-- Tests de integración que validen entrega at-least-once
-
----
-
-### 3.2 Researcher Agent — enrichment sin fuentes externas
-
-**Diseño:** el Researcher enriquece el lead con datos externos antes de generar embedding.
-
-**Código:** el Researcher recibe `{full_name, email, company, role}`, lo pasa a un LLM con un prompt de enrichment, y persiste el resultado como JSON en `leads.enriched_data` + embedding en `lead_embeddings`. **No consulta LinkedIn API, Crunchbase, Apollo, ZoomInfo ni ninguna fuente externa.** El LLM "infiere" un perfil plausible a partir del nombre de la empresa y el rol.
-
-**Por qué:** las APIs reales de enrichment requieren contratos con vendors (Apollo cuesta $99/mes mínimo) o aprobación de LinkedIn (proceso de semanas). En un prototipo, usar un LLM como enrichment sintético demuestra el patrón sin el costo.
-
-**Riesgo en producción:**
-- El enrichment alucinado puede contener información incorrecta del prospect
-- Los embeddings construidos sobre enrichment ficticio degradan la calidad del RAG
-- En un caso real, podrías mandar un mensaje personalizado con datos inventados — peor que un mensaje genérico
-
-**Qué requiere para producción:**
-- `EnrichmentProvider` con Strategy pattern: `ApolloProvider`, `ClearbitProvider`, `LinkedInScraperProvider`, `LLMFallbackProvider` (para cuando los anteriores fallan)
-- Cache de enrichment en Supabase con TTL (los datos del lead no cambian cada hora)
-- Validación cruzada: si dos providers difieren, marcar para revisión
+**Estimate:** 8-12h of development for a functional Scheduler without real channels; +15h for OAuth integrations in production.
 
 ---
 
-### 3.3 Circuit breaker (ADR-01) — implementado ✅
+## 3. Medium-severity gaps
 
-**Diseño:** ADR-01 menciona circuit breaker para protección ante caídas de proveedores LLM.
+### 3.1 Async Event Bus (ADR-03) — replaced by synchronous HTTP
 
-**Código:** `src/zolvo/llm/circuit_breaker.py` implementa un circuit breaker in-memory por provider con tres estados (closed → open → half-open). `LLMGateway.complete()` lo consulta antes de cada llamada: si el circuito está abierto, intenta automáticamente el siguiente provider disponible. Los fallos sucesivos (`failure_threshold=3`) abren el circuito por `recovery_timeout=60s`, luego pasa a half-open para probar recuperación.
+**Design:** Supabase Realtime + outbox pattern. Domain events (`lead.created`, `reply.received`, `message.sent`) published asynchronously. Subscribed workers consume them without blocking.
 
----
+**Code:** the API receives HTTP, executes the full pipeline in the same request, and responds with the result. The `events_outbox` table exists in migrations but **no code writes to it**.
 
-## 4. Brechas de severidad baja
+**Why:** a synchronous demo is easier to show in a video. `POST /events/reply` returns `{intent, action, confidence}` in the response, which is ideal for recording live logs. Making it async would have required a separate event consumer running alongside and a polling/SSE mechanism for the demo to observe the result.
 
-### 4.1 Re-engagement automático de leads `dormant`
+**Honest trade-off:**
+- ✅ Demo is more visible and debuggable
+- ❌ Blocking latency in the prospect's request (in real production, LinkedIn doesn't wait 8 seconds)
+- ❌ No backpressure when message spikes occur
+- ❌ `events_outbox` is defined but unused
 
-**Diseño:** la máquina de estados (§8 de arquitectura) define `dormant` con máximo 2 reintentos espaciados.
-
-**Código:** el estado está en `conversations.status` pero **no hay job programado que lo escanee** y dispare re-engagement.
-
-**Qué requiere:** un workflow en n8n con trigger Cron diario que consulte `conversations WHERE status='dormant' AND updated_at < NOW() - INTERVAL '7 days'` y dispare `POST /events/reengage`.
-
----
-
-### 4.2 Objection Handler especializado
-
-**Diseño:** componente independiente para objeciones complejas (precio, autoridad, timing).
-
-**Código:** absorbido por el `ConversationalistAgent` con `_INTENT_GUIDANCE` específico por tipo de objeción.
-
-**Decisión consciente:** un agente aparte habría sido duplicación. La guía por intent ya genera respuestas diferenciadas. Si en producción se valida que el copy de objeciones se beneficia de prompts más largos o RAG separado de casos exitosos, vale la pena fragmentar. Por ahora es prematuro.
+**What production requires:**
+- Async worker consuming from Supabase Realtime (channel per event type)
+- `events_outbox` written in the same transaction as state changes
+- Publisher worker that reads `events_outbox` and emits to Realtime with deduplication by `id`
+- Retry policy with DLQ for events that fail 3 times
+- Integration tests validating at-least-once delivery
 
 ---
 
-### 4.3 Confidence Gate "circular"
+### 3.2 Researcher Agent — enrichment without external sources
 
-**Crítica legítima:** el Evaluator usa un LLM (modelo barato) para evaluar lo que otro LLM (modelo caro) generó. Si ambos comparten sesgos del entrenamiento, el evaluador puede aprobar respuestas que un humano rechazaría.
+**Design:** the Researcher enriches the lead with external data before generating the embedding.
 
-**Por qué se aceptó:**
-- Sigue siendo mejor que NO tener evaluador
-- Captura los casos obvios: tono incorrecto, promesas explícitas de ROI, riesgos legales
-- El umbral 0.70 permite calibrar conservadoramente
+**Code:** the Researcher receives `{full_name, email, company, role}`, passes it to an LLM with an enrichment prompt, and persists the result as JSON in `leads.enriched_data` + embedding in `lead_embeddings`. **It does not query LinkedIn API, Crunchbase, Apollo, ZoomInfo, or any external source.** The LLM "infers" a plausible profile from the company name and role.
 
-**Mejora para producción:**
-- Reglas determinísticas como pre-filtro antes del evaluador LLM (regex para precios prometidos, palabras prohibidas, longitud máxima, ratio mayúsculas/minúsculas)
-- Evaluador con modelo de familia diferente al generador (Anthropic genera, OpenAI evalúa) para reducir sesgo compartido
-- Sample manual periódico (10% de mensajes aprobados) para auditoría humana → dataset de fine-tuning
+**Why:** real enrichment APIs require vendor contracts (Apollo starts at $99/month) or LinkedIn approval (a weeks-long process). In a prototype, using an LLM as synthetic enrichment demonstrates the pattern without the cost.
+
+**Production risk:**
+- Hallucinated enrichment may contain incorrect prospect information
+- Embeddings built on fictional enrichment degrade RAG quality
+- In a real case, you could send a personalized message with invented facts — worse than a generic message
+
+**What production requires:**
+- `EnrichmentProvider` with Strategy pattern: `ApolloProvider`, `ClearbitProvider`, `LinkedInScraperProvider`, `LLMFallbackProvider`
+- Enrichment cache in Supabase with TTL (lead data doesn't change every hour)
+- Cross-validation: if two providers disagree, flag for review
 
 ---
 
-## 5. Decisiones explícitas de mock vs real (por diseño, no por tiempo)
+### 3.3 Circuit breaker (ADR-01) — implemented ✅
 
-Estas no son brechas, son trade-offs deliberados:
+**Design:** ADR-01 mentions circuit breaker for protection against LLM provider outages.
 
-| Mock | Razón |
+**Code:** `src/zolvo/llm/circuit_breaker.py` implements an in-memory circuit breaker per provider with three states (closed → open → half-open). `LLMGateway.complete()` checks it before each call: if the circuit is open, it automatically tries the next available provider. Successive failures (`failure_threshold=3`) open the circuit for `recovery_timeout=60s`, then move to half-open to probe recovery.
+
+---
+
+## 4. Low-severity gaps
+
+### 4.1 Automatic re-engagement of `dormant` leads
+
+**Design:** the state machine (§8 of architecture) defines `dormant` with a maximum of 2 spaced retries.
+
+**Code:** the state exists in `conversations.status` but **there is no scheduled job that scans it** and triggers re-engagement.
+
+**What it requires:** an n8n workflow with a daily Cron trigger that queries `conversations WHERE status='dormant' AND updated_at < NOW() - INTERVAL '7 days'` and fires `POST /events/reengage`.
+
+---
+
+### 4.2 Specialized Objection Handler
+
+**Design:** independent component for complex objections (price, authority, timing).
+
+**Code:** absorbed by `ConversationalistAgent` with intent-specific `_INTENT_GUIDANCE`.
+
+**Conscious decision:** a separate agent would have been duplication. The intent-based guide already generates differentiated responses. If production validates that objection copy benefits from longer prompts or separate RAG over successful cases, fragmenting makes sense. For now it is premature.
+
+---
+
+### 4.3 "Circular" Confidence Gate
+
+**Legitimate criticism:** the Evaluator uses an LLM (cheap model) to evaluate what another LLM (premium model) generated. If both share training biases, the evaluator may approve responses that a human would reject.
+
+**Why it was accepted:**
+- Still better than having no evaluator
+- Catches the obvious cases: wrong tone, explicit ROI promises, legal risks
+- The 0.70 threshold allows conservative calibration
+
+**Production improvement:**
+- Deterministic rules as pre-filter before the LLM evaluator (already implemented: regex for promised prices, forbidden words, max length, caps ratio)
+- Evaluator using a model from a different family than the generator (Anthropic generates, OpenAI evaluates) to reduce shared bias
+- Periodic manual sampling (10% of approved messages) for human audit → fine-tuning dataset
+
+---
+
+## 5. Explicit mock decisions (by design, not by time)
+
+These are not gaps — they are deliberate trade-offs:
+
+| Mock | Reason |
 |---|---|
-| `LinkedInMockAdapter` | App de LinkedIn requiere aprobación (semanas). Diseñar el adapter con interfaz clara es el aporte arquitectónico. |
-| `EmailMockAdapter` | OAuth de Google Workspace fuera de alcance de 48h. |
-| `SlackStub` | Sin webhook real configurado. El log estructurado cumple la función demostrativa. |
-| Calendar real | Mismo motivo que LinkedIn. |
-| n8n con OAuth completo | Mismo motivo. Workflows quedan como blueprint estructural. |
+| `LinkedInMockAdapter` | LinkedIn App requires approval (weeks). Designing the adapter with a clean interface is the architectural contribution. |
+| `EmailMockAdapter` | Google Workspace OAuth is out of 48h scope. |
+| `SlackStub` | No real webhook configured. Structured logging fulfills the demo function. |
+| Real Calendar | Same reason as LinkedIn. |
+| n8n with full OAuth | Same reason. Workflows remain as structural blueprints. |
 
-En todos los casos, **la abstracción (ABC + Strategy) está implementada**. Cambiar el mock por la implementación real es localizable a un solo archivo, sin tocar agentes, orchestrator ni intent classifier.
-
----
-
-## 6. Crítica honesta al rol de n8n en el prototipo
-
-Esta es la observación más probable de un evaluador técnico, así que la abordo directo:
-
-**Realidad del demo:** los dos workflows de n8n (`zolvo-new-lead-ingestion` y `zolvo-reply-received`) actúan principalmente como **proxies HTTP**: reciben un webhook, hacen un POST a la API FastAPI, devuelven la respuesta. n8n no está orquestando lógica compleja en este demo.
-
-**Por qué se hizo así:**
-- El brief pide "pipeline con n8n + Supabase + LLMs". Tener n8n disparando workflows visibles cumple ese pedido literalmente.
-- La lógica compleja (multi-agente, Strategy pattern, evaluación) vive en Python por las razones del ADR-01 (testeabilidad, mantenibilidad, versionado). Llevarla a nodos de n8n habría sacrificado eso.
-- En producción n8n crece con: nodos de LinkedIn API, Gmail, Google Calendar, schedulers Cron, alertas Slack/Discord, branches por canal/segmento. El `n8n/README.md` describe ese estado objetivo.
-
-**Lo que un evaluador exigente podría argumentar:** "el demo no demuestra el valor real de n8n, solo lo usa como proxy". Es una crítica válida y reconocida.
-
-**Defensa:** el demo prioriza demostrar la arquitectura de agentes y el pipeline de dos puertas, donde está el aporte técnico genuino. n8n es la fachada operacional para el sales rep, no el núcleo computacional. Mover el núcleo a n8n habría sido cumplimiento literal sacrificando atributos de calidad.
+In all cases, **the abstraction (ABC + Strategy) is implemented**. Swapping a mock for the real implementation is localized to a single file, without touching agents, orchestrator, or intent classifier.
 
 ---
 
-## 7. Qué NO se debe interpretar como brecha
+## 6. Honest critique of n8n's role in the prototype
 
-Algunas críticas posibles que **no son fallas sino decisiones explícitas**:
+This is the observation most likely from a technical reviewer, so addressing it directly:
 
-- **"El prototipo solo usa un tenant"** — el diseño multi-tenant está completo en migrations + RLS + filtrado por `tenant_id`. La demo usa un tenant porque mostrar dos no agrega información, solo ruido.
-- **"Los tests usan FakeLLMProvider"** — esto es **correcto por diseño**, no atajo. Tests determinísticos sin red ni costo. Los tests de integración contra Supabase real existen aparte.
-- **"No hay dashboard web"** — el dashboard es endpoint JSON (`GET /operator/dashboard`) que se renderiza con `rich` en el demo. Un frontend separado habría sido scope creep.
-- **"El demo usa solo 1 lead"** — el script `demo/run_happy_path.py` es secuencial por claridad. El sistema procesa N leads paralelos sin cambios; el demo está optimizado para video.
+**Demo reality:** the two n8n workflows (`zolvo-new-lead-ingestion` and `zolvo-reply-received`) act primarily as **HTTP proxies**: receive a webhook, POST to the FastAPI API, return the response. n8n is not orchestrating complex logic in this demo.
+
+**Why it was done this way:**
+- The brief asks for "pipeline with n8n + Supabase + LLMs." Having n8n trigger visible workflows fulfills that literally.
+- The complex logic (multi-agent, Strategy pattern, evaluation) lives in Python for the reasons in ADR-01 (testability, maintainability, versioning). Moving it to n8n nodes would have sacrificed those.
+- In production n8n grows with: LinkedIn API nodes, Gmail, Google Calendar, Cron schedulers, Slack/Discord alerts, branches by channel/segment. The `n8n/README.md` describes that target state.
+
+**What a demanding reviewer might argue:** "the demo doesn't show n8n's real value, it just uses it as a proxy." That is a valid and acknowledged criticism.
+
+**Defense:** the demo prioritizes demonstrating the agent architecture and the two-gate pipeline, where the genuine technical contribution lies. n8n is the operational facade for the sales rep, not the computational core. Moving the core to n8n would have been literal compliance at the cost of quality attributes.
 
 ---
 
-## 8. Roadmap de cierre de brechas, priorizado
+## 7. What should NOT be interpreted as a gap
 
-Si tuviera 1 semana más de desarrollo, este es el orden de implementación:
+Some likely criticisms that **are not failures but explicit decisions**:
 
-| Día | Brecha | Razón de prioridad |
+- **"The prototype only uses one tenant"** — the multi-tenant design is complete in migrations + RLS + `tenant_id` filtering. The demo uses one tenant because showing two adds noise, not information.
+- **"Tests use FakeLLMProvider"** — this is **correct by design**, not a shortcut. Deterministic tests without network cost. Integration tests against real Supabase exist separately.
+- **"No web dashboard"** — the dashboard is a JSON endpoint (`GET /operator/dashboard`) plus a full HTML+Chart.js page at `/dashboard`. Both are implemented.
+- **"The demo uses only 1 lead"** — `demo/run_happy_path.py` is sequential for clarity. The system processes N leads in parallel without code changes; the demo is optimized for video recording.
+
+---
+
+## 8. Gap closure roadmap, prioritized
+
+With one more week of development, this is the implementation order:
+
+| Day | Gap | Priority reason |
 |---|---|---|
-| ✅ | Debouncing con jitter | Implementado — falta advisory lock para race conditions reales |
-| ✅ | Circuit breaker in-memory | Implementado — falta estado distribuido (Redis) para multi-worker |
-| 1 | Advisory lock (`pg_advisory_xact_lock`) | Cierra la parte faltante del ADR-06 |
-| 1-2 | Scheduler Agent + Google Calendar real | El brief pide book meetings — sin esto, el sistema queda incompleto |
-| 2-3 | Event Bus async + outbox pattern | Habilita escalabilidad real y elimina latencia bloqueante |
-| 3-4 | Researcher con Apollo/Clearbit | Sin enrichment real, el copy puede tener datos inventados |
-| 4-5 | Re-engagement de `dormant` + objection handler | Refinamientos del funnel |
-| 5-6 | Tests de carga, auditoría manual de mensajes, hardening | Pre-producción |
+| ✅ | Debouncing with jitter | Implemented — advisory lock for real race conditions still missing |
+| ✅ | In-memory circuit breaker | Implemented — distributed state (Redis) needed for multi-worker |
+| 1 | Advisory lock (`pg_advisory_xact_lock`) | Closes the missing part of ADR-06 |
+| 1-2 | Scheduler Agent + real Google Calendar | The brief asks to book meetings — without this the system is incomplete |
+| 2-3 | Async Event Bus + outbox pattern | Enables real scalability and eliminates blocking latency |
+| 3-4 | Researcher with Apollo/Clearbit | Without real enrichment, copy may contain invented data |
+| 4-5 | Re-engagement of `dormant` + objection handler | Funnel refinements |
+| 5-6 | Load tests, manual message audit, hardening | Pre-production |
 
 ---
 
-## 9. Lo que el prototipo SÍ demuestra (para balance)
+## 9. What the prototype DOES demonstrate (for balance)
 
-Para no terminar este documento solo en lo que falta:
+To avoid ending this document only on what's missing:
 
-- **Diseño con criterio de ingeniería:** atributos de calidad priorizados explícitamente, ADRs con trade-offs honestos, C4 a 3 niveles, máquina de estados modelada.
-- **Strategy pattern real:** 4 proveedores de LLM intercambiables con routing por costo. Cambiar de OpenRouter a Anthropic toma 1 línea en `.env`.
-- **Observabilidad como first-class citizen:** cada decisión de cada agente queda en `agent_runs` con costo, latencia, tokens, payloads. El ROI es computable, no estimado.
-- **Multi-tenant desde día 1:** RLS implementado en todas las tablas. Filtrado por `tenant_id` defendido a nivel de base de datos.
-- **Pipeline de dos puertas funcional:** Intent Classifier filtra qué intentar, Confidence Gate valida lo intentado. Documentado en ADR-04 e implementado.
-- **Memoria dual real:** short-term textual (últimos 15 msgs) + long-term vectorial (pgvector con `match_lead_embeddings` y `match_conversation_summaries`). Las dos consultadas en cada turno.
-- **Demo end-to-end ejecutable:** un script reproduce el happy path en ~60 segundos con UI visual. Los datos quedan persistidos en Supabase real.
-- **Tests con FakeLLMProvider:** 54 tests pasando sin costo de API ni dependencia de red.
-
----
-
-## 9.bis Brechas conocidas introducidas durante el cierre de gaps
-
-El cierre de brechas (advisory lock, state machine, pre-filter, circuit breaker) introdujo decisiones que tienen su propia deuda. Las anoto explícitamente para que estén documentadas, no escondidas.
-
-### `_conv_locks` — eviction LRU con tope de 1000
-
-El lock per `conversation_id` (`events.py`) usa `OrderedDict` con tope `_MAX_CONV_LOCKS = 1000` y eviction LRU. Esto evita el memory leak obvio, pero **no es production-correct para multi-worker**:
-- En un worker corriendo solo, el tope de 1000 es defendible: cubre conversaciones activas y va descartando las inactivas.
-- En multi-worker (Gunicorn con N workers), cada worker tiene su propia copia del `OrderedDict` → 2 workers pueden adquirir locks distintos para la misma conversación.
-- Producción real: reemplazar por `pg_advisory_xact_lock` o Redis Redlock.
-
-### Circuit breaker fallback ignora `task_type`
-
-`LLMGateway.complete()` con circuit abierto en OpenRouter cae al siguiente provider disponible (orden de inserción del dict). Si el siguiente es OpenAI/Anthropic, **se usa modelo premium para una tarea de clasificación que debería costar fracción de centavo**. Esto rompe ADR-02 (routing por costo) durante el período de circuit abierto.
-
-**Mitigación en producción:** mantener pools separados por `task_type` (cheap vs premium) y abrir circuit solo dentro del pool correspondiente.
-
-### State machine es un setter incondicional, no una transición validada
-
-`Orchestrator` llama `update_status()` sin leer el estado actual. Una conversación en `lost` (terminal) que recibe un mensaje vuelve a `engaging`. Una conversación en `scheduling` vuelve a `engaging` si el siguiente mensaje no es meeting_intent.
-
-**Lo correcto:** `transition(current_state, event) → new_state` con tabla de transiciones válidas según `docs/arquitectura-zolvo.md §8`. Se difiere a producción porque corregirlo correctamente requiere refactor del Orchestrator y tests adicionales.
-
-### Pre-filter del Evaluator es un set de reglas hardcoded
-
-Las reglas (`_FORBIDDEN_PATTERNS`, `_MAX_DRAFT_CHARS`, `_MAX_CAPS_RATIO`) están en código. Un cliente regulado (banca, salud) podría querer reglas más estrictas (bloquear "menos de X días", "8 de cada 10 clientes"). El pre-filter es extensible pero no configurable por tenant.
-
-**En producción:** tabla `tenant_rules` con patrones por tenant + UI para que el cliente las administre.
-
-### Circuit breaker NO protege `LLMGateway.embed()`
-
-Solo `complete()` registra success/failure en el breaker. Si el provider falla en embeddings, el breaker no se entera. Si `embed()` falla 100 veces consecutivas, el siguiente `complete()` igual lo intenta. Inconsistencia menor — en producción `embed()` también debe usar `before_call()` y `record_*`.
-
-### Sin idempotencia HTTP
-
-`POST /events/reply` no acepta `request_id`. Si n8n reintenta por timeout (configurable a 30-60s) y el pipeline tarda más, el mismo mensaje se procesa dos veces. Se mitiga parcialmente con el lock por conversación, pero el inbound se persiste **antes** del lock — sigue habiendo doble inserción en `messages`.
-
-**En producción:** campo `external_message_id UNIQUE` en `messages` + upsert idempotente.
-
-### Debouncing demo (3-7s) sigue siendo "instantáneo" para un humano
-
-El default cambió de 30-90s a 3-7s para que el demo sea grabable. Un humano leyendo LinkedIn no responde en 5 segundos. La defensa es "es para demo", pero un evaluador que mire el `.env.example` puede señalar que el demo no demuestra realmente el efecto humanizador del ADR-06.
-
-**En producción:** mantener 30-90s por canal real, ajustar por horario laboral del prospect.
+- **Engineered design:** quality attributes explicitly prioritized, ADRs with honest trade-offs, C4 at 3 levels, modeled state machine.
+- **Real Strategy pattern:** 4 interchangeable LLM providers with cost-based routing. Switching from OpenRouter to Anthropic takes 1 line in `.env`.
+- **Observability as first-class citizen:** every decision of every agent lands in `agent_runs` with cost, latency, tokens, and payloads. ROI is computable, not estimated.
+- **Multi-tenant from day 1:** RLS implemented on all tables. `tenant_id` filtering defended at the database level.
+- **Functional two-gate pipeline:** Intent Classifier filters what to attempt; Confidence Gate validates what was attempted. Documented in ADR-04 and implemented.
+- **Real dual memory:** short-term textual (last 15 messages) + long-term vector (pgvector with `match_lead_embeddings` and `match_conversation_summaries`). Both queried on every turn.
+- **Runnable end-to-end demo:** a script reproduces the happy path in ~60 seconds with visual UI. Data is persisted in real Supabase.
+- **Tests with FakeLLMProvider:** 54 tests passing without API cost or network dependency.
 
 ---
 
-## 10. Cómo defender este documento ante un evaluador
+## 9.bis Known gaps introduced during gap-closure
 
-Si un evaluador pregunta "¿por qué X no está implementado?", la respuesta está aquí. Si pregunta algo no listado aquí, eso es genuinamente un gap que no anticipé y vale la pena anotar para el siguiente ciclo.
+The gap-closure work (advisory lock, state machine, pre-filter, circuit breaker) introduced decisions with their own technical debt. Listed explicitly so they are documented, not hidden.
 
-**El principio detrás de este archivo:** prefiero que un evaluador me lea decir "esto no lo hice y aquí está por qué" antes que descubrirlo él mismo y concluir que no me di cuenta. La diferencia entre un junior y un senior frecuentemente es saber qué dejaste fuera y poder justificarlo.
+### `_conv_locks` — LRU eviction capped at 1000
+
+The per-`conversation_id` lock (`events.py`) uses an `OrderedDict` capped at `_MAX_CONV_LOCKS = 1000` with LRU eviction. This avoids the obvious memory leak, but **is not production-correct for multi-worker**:
+- In a single worker, the 1000 cap is defensible: covers active conversations and discards inactive ones.
+- In multi-worker (Gunicorn with N workers), each worker has its own `OrderedDict` → 2 workers can acquire separate locks for the same conversation.
+- Production: replace with `pg_advisory_xact_lock` or Redis Redlock.
+
+### Circuit breaker fallback ignores `task_type`
+
+`LLMGateway.complete()` with an open circuit on OpenRouter falls back to the next available provider (insertion-order). If the next is OpenAI/Anthropic, **a premium model is used for a classification task that should cost a fraction of a cent**. This breaks ADR-02 (cost-based routing) during the circuit-open period.
+
+**Production mitigation:** maintain separate pools per `task_type` (cheap vs. premium) and open the circuit only within the corresponding pool.
+
+### State machine is an unconditional setter, not a validated transition
+
+`Orchestrator` calls `update_status()` without reading the current state. A `lost` (terminal) conversation that receives a new message returns to `engaging`. A `scheduling` conversation returns to `engaging` if the next message is not `meeting_intent`.
+
+**What is correct:** `transition(current_state, event) → new_state` with a transition table matching `docs/arquitectura-zolvo.md §8`. Deferred to production because fixing it correctly requires Orchestrator refactoring and additional tests.
+
+### Evaluator pre-filter is a hardcoded rule set
+
+The rules (`_FORBIDDEN_PATTERNS`, `_MAX_DRAFT_CHARS`, `_MAX_CAPS_RATIO`) are in code. A regulated client (banking, healthcare) might want stricter rules. The pre-filter is extensible but not per-tenant configurable.
+
+**In production:** a `tenant_rules` table with per-tenant patterns + UI for the client to manage them.
+
+### Circuit breaker does NOT protect `LLMGateway.embed()`
+
+Only `complete()` registers success/failure in the breaker. If the provider fails on embeddings, the breaker doesn't know. In production `embed()` should also use `before_call()` and `record_*`.
+
+### No HTTP idempotency
+
+`POST /events/reply` does not accept a `request_id`. If n8n retries on timeout and the pipeline takes longer, the same message is processed twice. Partially mitigated by the conversation lock, but the inbound message is persisted **before** the lock — double insertion in `messages` is still possible.
+
+**In production:** `external_message_id UNIQUE` field in `messages` + idempotent upsert.
+
+### Demo debouncing (3-7s) is still "instant" for a human
+
+The default was changed from 30-90s to 3-7s so the demo can be recorded. A reviewer looking at `.env.example` may point out that the demo doesn't really demonstrate the humanization effect of ADR-06.
+
+**In production:** keep 30-90s for real channels, adjust by prospect's business hours.
 
 ---
 
-## 11. Roadmap hacia producción real
+## 10. How to defend this document to a reviewer
 
-Esta sección responde: *si este prototipo fuera a convertirse en un producto real con clientes pagando, ¿qué habría que hacer, en qué orden, y cuáles son los bloqueos reales?*
+If a reviewer asks "why isn't X implemented?", the answer is here. If they ask something not listed here, that is genuinely a gap I didn't anticipate and worth noting for the next cycle.
 
-### Lo que ya es production-ready sin cambios
+**The principle behind this document:** I'd rather a reviewer read me saying "I didn't do this and here's why" than discover it themselves and conclude I wasn't aware. The difference between a junior and a senior engineer is often knowing what you left out and being able to justify it.
 
-| Componente | Por qué es production-ready |
+---
+
+## 11. Roadmap to real production
+
+This section answers: *if this prototype were to become a real product with paying customers, what would need to be done, in what order, and what are the real blockers?*
+
+### What is already production-ready without changes
+
+| Component | Why it's production-ready |
 |---|---|
-| Strategy pattern LLM (4 providers) | Solo cambiar keys en `.env`; routing por costo ya implementado |
-| Pipeline de dos puertas | Escala horizontalmente; sin estado compartido entre requests |
-| Memoria dual con pgvector | Supabase maneja la carga; índices HNSW ya configurados |
-| RLS multi-tenant | Defendido a nivel de base de datos, no solo en código |
-| `agent_runs` observabilidad | ROI computable por tenant desde el día 1 |
-| Evaluator pre-filter | Reglas determinísticas que no dependen de un LLM externo |
+| Strategy pattern LLM (4 providers) | Just change keys in `.env`; cost-based routing already implemented |
+| Two-gate pipeline | Scales horizontally; no shared state between requests |
+| Dual memory with pgvector | Supabase handles the load; HNSW indexes already configured |
+| RLS multi-tenant | Defended at the database level, not just in code |
+| `agent_runs` observability | ROI computable per tenant from day 1 |
+| Evaluator pre-filter | Deterministic rules that don't depend on an external LLM |
 
 ---
 
-### Fase 0 — Infra base (2-4 semanas)
+### Phase 0 — Base infrastructure (2-4 weeks)
 
-**Objetivo:** exponer el sistema a internet con seguridad mínima.
+**Goal:** expose the system to the internet with minimum security.
 
-**1. Autenticación en la API**
-Todos los endpoints son públicos en el prototipo. En producción: API keys por tenant con middleware FastAPI. Sin esto no se puede exponer a internet. Alternativa más robusta: OAuth 2.0 con Supabase Auth.
+**1. API authentication**
+All endpoints are public in the prototype. In production: API keys per tenant with FastAPI middleware. Without this the system cannot be exposed to the internet.
 
-**2. Deployment real**
-El `uvicorn` local no sirve para producción. Stack mínimo:
-- Gunicorn + múltiples workers Uvicorn workers
-- Railway, Fly.io, o un VPS en GCP/AWS
-- Nginx o Caddy como reverse proxy
-- SSL automático (Let's Encrypt)
+**2. Real deployment**
+Local `uvicorn` is not suitable for production. Minimum stack:
+- Gunicorn + multiple Uvicorn workers
+- Railway, Fly.io, or a VPS on GCP/AWS
+- Nginx or Caddy as reverse proxy
+- Automatic SSL (Let's Encrypt)
 
-**3. Advisory lock distribuido**
-El `asyncio.Lock` in-memory del prototipo no funciona con múltiples workers. Reemplazar con:
-- `pg_advisory_xact_lock(hashtext('conv:' || conversation_id::text))` en Supabase, o
-- Redis Redlock para lock distribuido multi-proceso
+**3. Distributed advisory lock**
+The in-memory `asyncio.Lock` in the prototype doesn't work with multiple workers. Replace with:
+- `pg_advisory_xact_lock(hashtext('conv:' || conversation_id::text))` in Supabase, or
+- Redis Redlock for cross-process distributed locking
 
-**4. Event Bus real (eliminar latencia bloqueante)**
-Hoy `POST /events/reply` bloquea 5-15 segundos mientras corre el pipeline completo. En producción el endpoint debe retornar 202 inmediato y procesar en background. Opciones por complejidad creciente:
-- **Supabase Realtime** — workers Python suscritos a cambios en `events_outbox` (ya tienes Supabase, cero infra nueva)
-- **Redis Streams + ARQ** — más control, requiere Redis
-- **Celery + RabbitMQ** — más maduro, más operacional
+**4. Real Event Bus (eliminate blocking latency)**
+Today `POST /events/reply` blocks 5-15 seconds while the full pipeline runs. In production the endpoint must return 202 immediately and process in the background. Options by increasing complexity:
+- **Supabase Realtime** — Python workers subscribed to `events_outbox` changes (already have Supabase, zero new infra)
+- **Redis Streams + ARQ** — more control, requires Redis
+- **Celery + RabbitMQ** — more mature, more operational overhead
 
-**5. Secretos en vault**
-El `.env` en el servidor no escala. AWS Secrets Manager, GCP Secret Manager, Doppler, o 1Password Secrets Automation.
+**5. Secrets vault**
+`.env` on the server doesn't scale. AWS Secrets Manager, GCP Secret Manager, Doppler, or 1Password Secrets Automation.
 
 ---
 
-### Fase 1 — Canales reales (2-6 meses)
+### Phase 1 — Real channels (2-6 months)
 
-Esta es la fase más lenta. Los canales definen si el producto puede existir.
+#### LinkedIn — the critical bottleneck
 
-#### LinkedIn — el cuello de botella crítico
+LinkedIn has an official API for messaging, but it requires **LinkedIn Marketing Developer Platform partnership**:
+1. Apply at `developer.linkedin.com` with a detailed use case
+2. Manual review by LinkedIn (automated SDRs is a sensitive case)
+3. Approval: between 4 weeks and never — LinkedIn is very restrictive
 
-LinkedIn tiene API oficial para mensajería, pero requiere **LinkedIn Marketing Developer Platform partnership**:
-1. Aplicar en `developer.linkedin.com` con caso de uso detallado
-2. Revisión manual por LinkedIn (SDRs automatizados es un caso sensible)
-3. Aprobación: entre 4 semanas y nunca — LinkedIn es muy restrictivo
-4. Costo: el acceso a mensajería no está en el plan gratuito
-
-**Alternativa pragmática para early stage:** integrar con herramientas ya aprobadas por LinkedIn (Lemlist, Instantly.ai, Expandi, La Growth Machine). Zolvo se conecta vía su API/webhook en lugar de ir directo a LinkedIn. Resuelve el bloqueo en semanas. El `LinkedInMockAdapter` se reemplaza por el SDK de la herramienta — una línea en `deps.py`.
+**Pragmatic early-stage alternative:** integrate with tools already approved by LinkedIn (Lemlist, Instantly.ai, Expandi, La Growth Machine). Zolvo connects via their API/webhook. The `LinkedInMockAdapter` is replaced by the tool's SDK — one line in `deps.py`.
 
 #### Email — trivial
 
-- SendGrid, Postmark, o Resend — setup en 1 día
-- Reemplazar `EmailMockAdapter` con el SDK del provider elegido
-- Configurar SPF/DKIM/DMARC en el dominio del cliente (crítico para deliverability)
-- Manejar bounces y unsubscribes (legalmente requerido en México)
+- SendGrid, Postmark, or Resend — 1-day setup
+- Configure SPF/DKIM/DMARC on the client's domain (critical for deliverability)
+- Handle bounces and unsubscribes (legally required in Mexico)
 
-#### Slack — fácil
+#### Google Calendar — complete Scheduler Agent
 
-- Slack App con `incoming_webhooks` scope — medio día
-- Reemplazar `SlackStub` con llamadas al webhook real
-
-#### Google Calendar — Scheduler Agent completo
-
-El que más falta hace para cerrar el ciclo de meeting booking:
 1. Google Cloud project + OAuth 2.0 credentials
-2. Flujo de autorización por cliente (cada cliente de Zolvo autoriza su propio Calendar)
-3. Implementar `SchedulerAgent(AgentBase)` con `GoogleCalendarAdapter`
-4. Parser de intent secundario: texto "el jueves a las 3pm" → `datetime` → verificar disponibilidad → crear evento → enviar `.ics`
-5. Estado `scheduling` activo en la máquina de estados
+2. Authorization flow per client
+3. Implement `SchedulerAgent(AgentBase)` with `GoogleCalendarAdapter`
+4. Secondary intent parser: text "Thursday at 3pm" → `datetime` → check availability → create event → send `.ics`
+5. Active `scheduling` state in the state machine
 
-Esfuerzo estimado: 2-3 semanas. Sin bloqueos de aprobación como LinkedIn.
+Estimated effort: 2-3 weeks. No approval blockers like LinkedIn.
 
 ---
 
-### Fase 2 — Enrichment real (paralelo a Fase 1)
+### Phase 2 — Real enrichment (parallel to Phase 1)
 
-El `ResearcherAgent` infiere datos con LLM sobre el nombre/empresa/rol que ya tienes. Introduce riesgo de alucinación en datos factuales (headcount inventado, funding incorrecto).
+**Enrichment stack by cost/quality:**
 
-**Stack de enrichment por costo/calidad:**
-
-| Fuente | Costo | Calidad para México | Setup |
+| Source | Cost | Quality for Mexico | Setup |
 |---|---|---|---|
-| Apollo.io | $99+/mes | Alta — buena cobertura B2B LATAM | 1 día |
-| Clearbit | Variable por lookup | Alta | 1 día |
-| Hunter.io | $49+/mes | Media — emails principalmente | 1 día |
-| ZoomInfo | $15k+/año | Muy alta | Semanas (ventas) |
+| Apollo.io | $99+/month | High — good B2B LATAM coverage | 1 day |
+| Clearbit | Variable per lookup | High | 1 day |
+| Hunter.io | $49+/month | Medium — mainly emails | 1 day |
+| ZoomInfo | $15k+/year | Very high | Weeks (sales process) |
 
-**Arquitectura:** agregar `EnrichmentProvider` ABC con `ApolloProvider` como primera implementación. El Researcher llama primero al enrichment externo, luego usa el LLM solo para análisis cualitativo sobre datos ya verificados — no para inventar hechos.
-
----
-
-### Fase 3 — Hardening de producción (1-2 meses)
-
-Lo que diferencia "funciona" de "puede tener clientes pagando":
-
-**Prompt management**
-Los prompts son archivos `.txt` en git. En producción: versionado con A/B testing por tenant, rollback instantáneo, métricas de performance por versión. Herramientas: Langfuse, PromptLayer, o una tabla en Supabase con versiones.
-
-**LLM observability**
-Saber cuándo el modelo está alucinando a escala. Helicone o Langfuse integrado con `agent_runs`. Alertas cuando `confidence_score_avg` de un tenant cae bajo 0.65 durante 24h.
-
-**Rate limiting por prospect**
-No se puede contactar al mismo lead 10 veces/día. Redis counters por `(lead_id, channel, day)` con límites configurables por tenant. Verificar antes de cada envío.
-
-**Circuit breaker distribuido**
-El `CircuitBreaker` in-memory del prototipo no comparte estado entre workers. Reemplazar con Redis para que los 4 workers tengan la misma visión del estado de cada provider.
-
-**Opt-out global**
-Base de datos de emails/LinkedIn URLs que no deben ser contactados jamás. Verificación antes de cada envío. Legalmente requerido en México.
-
-**Human-in-the-loop para escalaciones**
-Hoy la escalación loguea en Slack. En producción: interfaz web donde el SDR ve drafts bloqueados, los edita y aprueba. Puede ser Retool en la fase inicial; luego una pantalla del dashboard propio.
-
-**Billing por tenant**
-`agent_runs.cost_usd` ya rastrea el costo de API por operación. Agregar Stripe encima para cobrar según consumo. El modelo de datos ya está listo.
+**Architecture:** add `EnrichmentProvider` ABC with `ApolloProvider` as the first implementation. The Researcher calls external enrichment first, then uses the LLM only for qualitative analysis over already-verified data.
 
 ---
 
-### Fase 4 — Escala (cuando hay tracción)
+### Phase 3 — Production hardening (1-2 months)
 
-Solo importa si hay clientes y volumen real:
-
-- **Worker pool horizontal** — múltiples instancias procesando colas paralelas. Kubernetes o Railway autoscaling.
-- **Embedding cache** — no recalcular embeddings de leads que ya pasaron por el Researcher. TTL de 7 días en Redis.
-- **Modelo fine-tuned** — con 500+ conversaciones exitosas, fine-tunear un modelo propio para el ICP mexicano. Reduce costos ~10x y mejora tono cultural.
-- **Multi-canal por lead** — orquestar LinkedIn + email + WhatsApp en secuencia según comportamiento del prospecto.
-
----
-
-### El bloqueo más subestimado: compliance legal
-
-En México aplica la **Ley Federal de Protección de Datos Personales en Posesión de Particulares (LFPDPPP)**:
-- Consentimiento para procesar datos personales de los prospectos (que no te dieron permiso explícito)
-- Aviso de privacidad por cada empresa cliente de Zolvo
-- Derechos ARCO (Acceso, Rectificación, Cancelación, Oposición) para los prospectos contactados
-- Posible registro ante el INAI si se procesan datos sensibles
-
-Zolvo procesa datos personales de terceros (prospectos) en nombre de sus clientes. Esto requiere un **Data Processing Agreement (DPA)** con cada cliente y un análisis legal del flujo de datos completo.
-
-**Cuándo atender esto:** antes del primer cliente pagando. Resolver compliance retroactivamente con 100 clientes es exponencialmente más caro.
+- **Prompt management:** version control with per-tenant A/B testing, instant rollback, per-version performance metrics (Langfuse, PromptLayer, or Supabase table)
+- **LLM observability:** Helicone or Langfuse integrated with `agent_runs`; alerts when `confidence_score_avg` drops below 0.65 over 24h
+- **Per-prospect rate limiting:** Redis counters per `(lead_id, channel, day)` with tenant-configurable limits
+- **Distributed circuit breaker:** Redis-backed so all workers share provider state
+- **Global opt-out:** database of emails/LinkedIn URLs that must never be contacted; legally required in Mexico
+- **Human-in-the-loop:** web interface for SDR to review, edit, and approve escalated drafts
+- **Tenant billing:** Stripe usage-based billing on top of `agent_runs.cost_usd`
 
 ---
 
-### Resumen: tiempo y equipo para el primer cliente real
+### Phase 4 — Scale (when there's traction)
+
+- **Horizontal worker pool** — Kubernetes or Railway autoscaling
+- **Embedding cache** — 7-day TTL in Redis for already-processed leads
+- **Fine-tuned model** — with 500+ successful conversations; reduces costs ~10x and improves cultural tone
+- **Multi-channel per lead** — LinkedIn + email + WhatsApp orchestrated by prospect behavior
+
+---
+
+### The most underestimated blocker: legal compliance
+
+In Mexico the **Ley Federal de Protección de Datos Personales en Posesión de Particulares (LFPDPPP)** applies:
+- Consent to process personal data of prospects
+- Privacy notice for each of Zolvo's business clients
+- ARCO rights (Access, Rectification, Cancellation, Opposition) for contacted prospects
+
+Zolvo processes personal data of third parties (prospects) on behalf of its clients. This requires a **Data Processing Agreement (DPA)** with each client and a full legal review of the data flow. **Resolve this before the first paying customer.**
+
+---
+
+### Summary: time and team for the first real customer
 
 ```
-Semana 1-2 ── Autenticación API + deployment en servidor
-Semana 3-4 ── Email real (SendGrid) + Slack real + revisión legal LFPDPPP
-Mes 2      ── Google Calendar (Scheduler Agent completo)
-Mes 2-3    ── Apollo.io para enrichment verificado
-Mes 3-6    ── LinkedIn API o acuerdo con Lemlist/Instantly
-Continuo   ── Prompt optimization + observabilidad + billing
+Weeks 1-2  ── API authentication + server deployment
+Weeks 3-4  ── Real email (SendGrid) + real Slack + LFPDPPP legal review
+Month 2    ── Google Calendar (complete Scheduler Agent)
+Months 2-3 ── Apollo.io for verified enrichment
+Months 3-6 ── LinkedIn API or agreement with Lemlist/Instantly
+Ongoing    ── Prompt optimization + observability + billing
 ```
 
-**Equipo mínimo viable:**
+**Minimum viable team:**
 - 1 backend engineer (Python async, FastAPI, Supabase)
-- 1 persona de GTM/partnerships (LinkedIn approval + compliance)
+- 1 GTM/partnerships person (LinkedIn approval + compliance)
 
-Sin el segundo perfil, el canal principal (LinkedIn) puede tardar meses en desbloquearse independientemente de la calidad del código.
-
-**Costo de infra para el primer cliente:** ~$150-300/mes (Railway/Fly + Supabase pro + Apollo starter + LLM APIs). Escala linealmente con el volumen de leads procesados por mes.
+**Infrastructure cost for the first customer:** ~$150-300/month (Railway/Fly + Supabase pro + Apollo starter + LLM APIs). Scales linearly with lead volume.
 
 ---
 
-**Autor:** Stiven Yepes Vanegas
-**Fecha:** 24 de mayo de 2026
-**Última actualización:** roadmap de producción agregado post-entrega · Makers Admission 2026-2
+**Author:** Stiven Yepes Vanegas
+**Date:** May 24, 2026
+**Last updated:** production roadmap added post-submission · Makers Admission 2026-2
