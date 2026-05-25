@@ -118,7 +118,8 @@ class Orchestrator:
             if action == "escalate":
                 await self._conv_repo.update_status(conversation_id, "escalated")
             elif intent_result.intent == "meeting_intent":
-                await self._conv_repo.update_status(conversation_id, "closing")
+                # Aligned with state machine in docs/arquitectura-zolvo.md §8.
+                await self._conv_repo.update_status(conversation_id, "scheduling")
             else:
                 await self._conv_repo.update_status(conversation_id, "engaging")
 

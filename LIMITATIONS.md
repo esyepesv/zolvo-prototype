@@ -239,6 +239,53 @@ Para no terminar este documento solo en lo que falta:
 
 ---
 
+## 9.bis Brechas conocidas introducidas durante el cierre de gaps
+
+El cierre de brechas (advisory lock, state machine, pre-filter, circuit breaker) introdujo decisiones que tienen su propia deuda. Las anoto explícitamente para que estén documentadas, no escondidas.
+
+### `_conv_locks` — eviction LRU con tope de 1000
+
+El lock per `conversation_id` (`events.py`) usa `OrderedDict` con tope `_MAX_CONV_LOCKS = 1000` y eviction LRU. Esto evita el memory leak obvio, pero **no es production-correct para multi-worker**:
+- En un worker corriendo solo, el tope de 1000 es defendible: cubre conversaciones activas y va descartando las inactivas.
+- En multi-worker (Gunicorn con N workers), cada worker tiene su propia copia del `OrderedDict` → 2 workers pueden adquirir locks distintos para la misma conversación.
+- Producción real: reemplazar por `pg_advisory_xact_lock` o Redis Redlock.
+
+### Circuit breaker fallback ignora `task_type`
+
+`LLMGateway.complete()` con circuit abierto en OpenRouter cae al siguiente provider disponible (orden de inserción del dict). Si el siguiente es OpenAI/Anthropic, **se usa modelo premium para una tarea de clasificación que debería costar fracción de centavo**. Esto rompe ADR-02 (routing por costo) durante el período de circuit abierto.
+
+**Mitigación en producción:** mantener pools separados por `task_type` (cheap vs premium) y abrir circuit solo dentro del pool correspondiente.
+
+### State machine es un setter incondicional, no una transición validada
+
+`Orchestrator` llama `update_status()` sin leer el estado actual. Una conversación en `lost` (terminal) que recibe un mensaje vuelve a `engaging`. Una conversación en `scheduling` vuelve a `engaging` si el siguiente mensaje no es meeting_intent.
+
+**Lo correcto:** `transition(current_state, event) → new_state` con tabla de transiciones válidas según `docs/arquitectura-zolvo.md §8`. Se difiere a producción porque corregirlo correctamente requiere refactor del Orchestrator y tests adicionales.
+
+### Pre-filter del Evaluator es un set de reglas hardcoded
+
+Las reglas (`_FORBIDDEN_PATTERNS`, `_MAX_DRAFT_CHARS`, `_MAX_CAPS_RATIO`) están en código. Un cliente regulado (banca, salud) podría querer reglas más estrictas (bloquear "menos de X días", "8 de cada 10 clientes"). El pre-filter es extensible pero no configurable por tenant.
+
+**En producción:** tabla `tenant_rules` con patrones por tenant + UI para que el cliente las administre.
+
+### Circuit breaker NO protege `LLMGateway.embed()`
+
+Solo `complete()` registra success/failure en el breaker. Si el provider falla en embeddings, el breaker no se entera. Si `embed()` falla 100 veces consecutivas, el siguiente `complete()` igual lo intenta. Inconsistencia menor — en producción `embed()` también debe usar `before_call()` y `record_*`.
+
+### Sin idempotencia HTTP
+
+`POST /events/reply` no acepta `request_id`. Si n8n reintenta por timeout (configurable a 30-60s) y el pipeline tarda más, el mismo mensaje se procesa dos veces. Se mitiga parcialmente con el lock por conversación, pero el inbound se persiste **antes** del lock — sigue habiendo doble inserción en `messages`.
+
+**En producción:** campo `external_message_id UNIQUE` en `messages` + upsert idempotente.
+
+### Debouncing demo (3-7s) sigue siendo "instantáneo" para un humano
+
+El default cambió de 30-90s a 3-7s para que el demo sea grabable. Un humano leyendo LinkedIn no responde en 5 segundos. La defensa es "es para demo", pero un evaluador que mire el `.env.example` puede señalar que el demo no demuestra realmente el efecto humanizador del ADR-06.
+
+**En producción:** mantener 30-90s por canal real, ajustar por horario laboral del prospect.
+
+---
+
 ## 10. Cómo defender este documento ante un evaluador
 
 Si un evaluador pregunta "¿por qué X no está implementado?", la respuesta está aquí. Si pregunta algo no listado aquí, eso es genuinamente un gap que no anticipé y vale la pena anotar para el siguiente ciclo.

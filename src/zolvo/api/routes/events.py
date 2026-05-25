@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections import OrderedDict
 from decimal import Decimal
 
 import structlog
@@ -23,14 +24,20 @@ from zolvo.schemas import ReplyRequest, ReplyResponse
 router = APIRouter(prefix="/events", tags=["events"])
 log = structlog.get_logger(__name__)
 
-# In-memory lock per conversation_id — prevents parallel processing of the same
-# conversation in a single-process deployment (ADR-06).
-_conv_locks: dict[str, asyncio.Lock] = {}
+# In-memory LRU lock cache per conversation_id — prevents parallel processing of
+# the same conversation in a single-process deployment (ADR-06). Bounded to avoid
+# unbounded growth across many distinct conversations.
+_MAX_CONV_LOCKS = 1000
+_conv_locks: OrderedDict[str, asyncio.Lock] = OrderedDict()
 
 
 def _get_conv_lock(conv_id: str) -> asyncio.Lock:
-    if conv_id not in _conv_locks:
-        _conv_locks[conv_id] = asyncio.Lock()
+    if conv_id in _conv_locks:
+        _conv_locks.move_to_end(conv_id)
+        return _conv_locks[conv_id]
+    if len(_conv_locks) >= _MAX_CONV_LOCKS:
+        _conv_locks.popitem(last=False)  # evict least-recently-used
+    _conv_locks[conv_id] = asyncio.Lock()
     return _conv_locks[conv_id]
 
 

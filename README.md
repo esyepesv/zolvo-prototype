@@ -281,7 +281,7 @@ El endpoint `GET /operator/dashboard?tenant_id=...` agrega métricas en tiempo r
   "status_breakdown": {
     "researching": 12,
     "engaging": 65,
-    "closing": 8,
+    "scheduling": 8,
     "handoff": 4,
     "escalated": 2
   },
