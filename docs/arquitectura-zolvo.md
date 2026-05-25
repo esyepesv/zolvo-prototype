@@ -644,6 +644,17 @@ note right of awaiting_human
   This state materializes the "20% human"
   from the brief: 80% automated + 20% with
   human judgment when the system is uncertain.
+
+  Prototype implementation: `awaiting_human` is
+  split into two observable states for better
+  dashboard granularity:
+  - `handoff`  — Gate 1 routed to human (intent
+    is complex_technical, complaint, opt_out,
+    or out_of_scope). No draft was generated.
+  - `escalated` — Gate 2 blocked the draft
+    (confidence score below threshold). Draft
+    exists but requires human review before send.
+  Both trigger a Slack notification to the SDR.
 end note
 
 note bottom of dormant

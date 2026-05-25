@@ -29,8 +29,13 @@ WORKDIR /app
 # Copy installed Python packages from builder.
 COPY --from=builder --chown=zolvo:zolvo /root/.local /home/zolvo/.local
 
-# Copy application source.
+# Copy application source and demo/migration artefacts.
+# demo/ and supabase/ are included so `docker run zolvo-api python demo/...`
+# and manual migration inspection work without a separate volume mount.
 COPY --chown=zolvo:zolvo src ./src
+COPY --chown=zolvo:zolvo demo ./demo
+COPY --chown=zolvo:zolvo supabase ./supabase
+COPY --chown=zolvo:zolvo n8n ./n8n
 
 USER zolvo
 
