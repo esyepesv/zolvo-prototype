@@ -278,9 +278,9 @@ Only `complete()` registers success/failure in the breaker. If the provider fail
 
 **In production:** `external_message_id UNIQUE` field in `messages` + idempotent upsert.
 
-### Demo debouncing (3-7s) is still "instant" for a human
+### Demo debouncing (0s) is effectively disabled for the recording
 
-The default was changed from 30-90s to 3-7s so the demo can be recorded. A reviewer looking at `.env.example` may point out that the demo doesn't really demonstrate the humanization effect of ADR-06.
+`DEBOUNCE_MIN_SECONDS` and `DEBOUNCE_MAX_SECONDS` are set to `0` in `.env` so the demo runs in ~60s instead of 3+ minutes. A reviewer looking at `.env.example` may point out that the demo doesn't demonstrate the humanization effect of ADR-06.
 
 **In production:** keep 30-90s for real channels, adjust by prospect's business hours.
 

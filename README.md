@@ -78,13 +78,31 @@ PYTHONPATH=src .venv/bin/uvicorn zolvo.api.main:app --host 0.0.0.0 --reload
 
 ## End-to-end demo
 
-With the API running:
+With the API running in Terminal 1:
 
 ```bash
-PYTHONPATH=src .venv/bin/python demo/run_happy_path.py
+PYTHONPATH=src .venv/bin/uvicorn zolvo.api.main:app --host 0.0.0.0 --reload
 ```
 
-Full pipeline in ~60s with visual output using `rich`. The script runs an Ingest step plus 3 reply turns, prints a pipeline summary table, a LinkedIn inbox simulation, and the operator dashboard.
+### Happy path (all turns resolved by the agent)
+
+```bash
+.venv/bin/python demo/run_happy_path.py
+```
+
+Diego Ramírez @ CredIMex — interest → price objection → meeting intent. All 3 turns pass both gates; the agent responds autonomously. ~60s total.
+
+### Escalation path (Gate 1 routes to human rep)
+
+```bash
+.venv/bin/python demo/run_escalation_demo.py
+```
+
+Sofía Herrera @ Conekta — meeting intent → complex technical question → complaint. Turns 2 and 3 hit `HANDOFF`: the system recognises it cannot answer well and alerts the sales rep via Slack instead of generating a risky response.
+
+Both scripts print a pipeline summary table, a LinkedIn inbox simulation, and the operator dashboard.
+
+> **Reset between demos:** truncate data tables in Supabase before the second demo to start with a clean state.
 
 ### Web dashboard
 
@@ -122,9 +140,11 @@ Channels are implemented as stubs that log via structlog — visible in the API 
 
 | Adapter | What it does | Visible log in Terminal 1 |
 |---|---|---|
-| `LinkedInMockAdapter` | Simulates a LinkedIn DM send | `channel.linkedin.send` |
-| `EmailMockAdapter` | Simulates an email send | `channel.email.send` |
-| `SlackStub` | Notifies handoffs and escalations to the operator | `slack.handoff_alert` / `slack.escalation_alert` |
+| `LinkedInMockAdapter` | Simulates a LinkedIn DM send | `LINKEDIN ▸ Message sent to prospect` |
+| `EmailMockAdapter` | Simulates an email send | `EMAIL ▸ Message sent to prospect` |
+| `SlackStub` | Notifies handoffs and escalations to the operator | `HANDOFF !! ▸ Human rep required` / `ESCALATE !! ▸ Draft blocked` |
+
+All API logs use human-readable labels in `ENV=dev`. Each step of the pipeline appears as a labelled line with inline key metrics (intent, score, latency). JSON format is preserved for `ENV=prod`.
 
 In production each mock is replaced with a real adapter (LinkedIn API, SMTP, Slack Webhooks) without touching business logic.
 
@@ -313,7 +333,8 @@ zolvo-prototype/
 │   ├── schemas.py              # FastAPI request/response schemas
 │   └── config.py               # pydantic-settings
 ├── demo/
-│   ├── run_happy_path.py       # End-to-end demo script (rich UI)
+│   ├── run_happy_path.py       # Demo: all turns resolved autonomously (happy path)
+│   ├── run_escalation_demo.py  # Demo: Gate 1 HANDOFF path (complex_technical, complaint)
 │   └── metrics.sql             # Metrics queries for Supabase SQL Editor
 ├── supabase/
 │   ├── migrations/             # 3 versioned SQL files
@@ -347,6 +368,7 @@ zolvo-prototype/
 | 12 | Video polish (channel stubs, operator dashboard, prospect view) | ✅ |
 | 13 | Production gap closure (debounce, lock, circuit breaker, state transitions) | ✅ |
 | 14 | Web dashboard + Dockerization | ✅ |
+| 15 | Escalation demo script + human-readable API logs | ✅ |
 
 ## References
 
